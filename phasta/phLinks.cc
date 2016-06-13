@@ -13,6 +13,190 @@ bool LinkKey::operator<(LinkKey const& other) const
   return peer < other.peer;
 }
 
+typedef std::map<apf::Parts,int> PtnMdl;
+typedef std::map<int,int> Owners;
+
+/* returns the current partition model based on NormalSharing */
+void getPtnMdl(apf::Mesh* m, PtnMdl& pm) {
+  apf::MeshIterator* it = m->begin(0);
+  apf::MeshEntity* e;
+  apf::Parts res;
+  while ((e = m->iterate(it))) {
+    if( m->isShared(e) ) {
+      m->getResidence(e,res);
+      pm[res] = -1;
+    }
+  }
+  m->end(it);
+  APF_ITERATE(PtnMdl,pm,it)
+    pm[it->first] = *(it->first.begin());
+}
+
+void printPtnMdl(const char* key, PtnMdl& pm) {
+  APF_ITERATE(PtnMdl,pm,it) {
+    PCU_Debug_Print("%s pme ", key);
+    for (apf::Parts::iterator pid = it->first.begin(); pid != it->first.end(); pid++) {
+      PCU_Debug_Print("%d ", *pid);
+    }
+    PCU_Debug_Print(" owner %d\n", it->second);
+  }
+}
+
+/* exchange the number of owned partition model entities with neighbors */
+void exchangeOwners(PtnMdl& pm, Owners& own) {
+  const int self = PCU_Comm_Self();
+  APF_ITERATE(PtnMdl,pm,it) {
+    if( it->second == self )
+      own[self]++;
+    for (apf::Parts::iterator pid = it->first.begin(); pid != it->first.end(); pid++) {
+      if( *pid != self )
+        own[*pid] = 0; //need to know that the peer exists
+    }
+  }
+  PCU_Comm_Begin();
+  //send the number of owned partition model ents
+  APF_ITERATE(Owners,own,it)
+    PCU_COMM_PACK(it->second, own[self]);
+  PCU_Comm_Send();
+  //recv the neighbors owned partition model ents counts
+  while (PCU_Comm_Listen()) {
+    int peer = PCU_Comm_Sender();
+    int ownCnt = 0;
+    PCU_COMM_UNPACK(ownCnt);
+    own[peer] = ownCnt;
+  }
+}
+
+/* send the new owner of the partition model entity to all parts
+   bounded by the entity (the resident set 'res') */
+void packRes(const apf::Parts& res, int newowner) {
+  int* resArray = new int[res.size()];
+  int i = 0;
+  for (apf::Parts::iterator pid = res.begin(); pid != res.end(); pid++)
+    resArray[i++] = *pid;
+  for (apf::Parts::iterator pid = res.begin(); pid != res.end(); pid++) {
+    int peer = *pid;
+    int sz = res.size();
+    PCU_COMM_PACK(peer, sz);
+    PCU_Comm_Pack(peer, resArray, sizeof(int)*res.size());
+    PCU_COMM_PACK(peer, newowner);
+  }
+  delete [] resArray;
+}
+
+void unpackRes(apf::Parts& res, int& newowner) {
+  int size = 0;
+  PCU_COMM_UNPACK(size);
+  int* resArray = new int[size];
+  PCU_Comm_Unpack(resArray, sizeof(int)*size);
+  PCU_COMM_UNPACK(newowner);
+  for(int i=0; i<size; i++)
+    res.insert(resArray[i]);
+  delete [] resArray;
+}
+
+int poorestNeighbor(const apf::Parts& res, Owners& own) {
+  int poorest = PCU_Comm_Peers();
+  int poorestid = -1;
+  for (apf::Parts::iterator pid = res.begin(); pid != res.end(); pid++)
+     if( own[*pid] < poorest ) {
+       poorest = own[*pid];
+       poorestid = *pid;
+     }
+  assert(poorestid != -1);
+  return poorestid;
+}
+
+/* returns the partition model with balanced ownership */
+void balanceOwners(PtnMdl& pm) {
+  double t0 = PCU_Time();
+  const int self = PCU_Comm_Self();
+  PCU_Debug_Open();
+  Owners own;
+  exchangeOwners(pm,own);
+  //DEBUG {
+  printPtnMdl("init",pm);
+  APF_ITERATE(Owners,own,it)
+    PCU_Debug_Print("init peer %d owns %d\n", it->first, it->second);
+  PCU_Debug_Print("init owned %d\n", own[self]);
+  //DEBUG }
+  int maxOwn = PCU_Max_Int(own[self]);
+  int maxPeers = PCU_Max_Int(own.size()-1);
+  int iter = 0;
+  const int maxIter = 100;
+  const int ownershipLimit = maxPeers/2;
+  if( !PCU_Comm_Self() )
+    fprintf(stderr, "maxOwned %d maxPeers %d ownershipLimit %d maxIter %d\n", 
+        maxOwn, maxPeers, ownershipLimit, maxIter);
+  while( maxOwn > ownershipLimit && iter++ < maxIter ) {
+    PCU_Comm_Begin();
+    //compute and send owner changes
+    APF_ITERATE(PtnMdl,pm,it) {
+      if( own[self] > ownershipLimit && it->second == self ) {
+        int newowner = poorestNeighbor(it->first,own);
+        PCU_Debug_Print("setting newowner %d\n", newowner);
+        it->second = newowner;
+        packRes(it->first,newowner);
+        own[self]--;
+        assert(own.count(newowner));
+        own[newowner]++;
+      }
+    }
+    PCU_Comm_Send();
+    //recv the owner changes
+    while (PCU_Comm_Listen()) {
+      int peer = PCU_Comm_Sender();
+      apf::Parts res;
+      int newowner = 0;
+      unpackRes(res,newowner);
+      PCU_Debug_Print("getting newowner %d from peer %d\n", newowner, peer);
+      pm[res] = newowner;
+      own[peer]--;
+      assert(own.count(newowner));
+      own[newowner]++;
+    }
+    maxOwn = PCU_Max_Int(own[self]);
+    PCU_Debug_Print("owned %d\n", own[self]);
+    if( !PCU_Comm_Self() )
+      fprintf(stderr, "maxOwned %d\n", maxOwn);
+  }
+  if( !PCU_Comm_Self() )
+    fprintf(stderr, "maxOwned %d iter %d time %.3f\n", 
+        maxOwn, iter, PCU_Time()-t0);
+  //DEBUG {
+  printPtnMdl("final",pm);
+  APF_ITERATE(Owners,own,it)
+    PCU_Debug_Print("final peer %d owns %d\n", it->first, it->second);
+  PCU_Debug_Print("final owned %d\n", own[self]);
+  //DEBUG }
+}
+
+struct BalancedSharing : public apf::Sharing
+{
+  BalancedSharing(apf::Mesh* m) {
+    mesh = m;
+    helper = apf::getSharing(m);
+    getPtnMdl(mesh,pm);
+    balanceOwners(pm);
+  }
+  ~BalancedSharing() {
+    delete helper;
+  }
+  bool isOwned(apf::MeshEntity* e) {
+    apf::Parts res;
+    mesh->getResidence(e,res);
+    return pm[res];
+  }
+  void getCopies(apf::MeshEntity* e,
+      apf::CopyArray& copies)
+  {
+    helper->getCopies(e, copies);
+  }
+  private:
+  apf::Mesh* mesh;
+  apf::Sharing* helper;
+  PtnMdl pm;
+};
 /* the PhastaSharing class is responsible for ensuring that
    ILWORK links matched entities correctly. */
 
@@ -21,6 +205,7 @@ struct PhastaSharing : public apf::Sharing {
   {
     mesh = m;
     helper = apf::getSharing(m);
+    BalancedSharing bs(m);
   }
   ~PhastaSharing()
   {
