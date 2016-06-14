@@ -110,14 +110,15 @@ void unpackRes(apf::Parts& res, int& newowner) {
 }
 
 int poorestNeighbor(const apf::Parts& res, Owners& own) {
-  int poorest = PCU_Comm_Peers();
+  const int neighborLimit = 10000;
+  int poorest = neighborLimit;
   int poorestid = -1;
   for (apf::Parts::iterator pid = res.begin(); pid != res.end(); pid++)
      if( *pid != PCU_Comm_Self() && own[*pid] < poorest ) {
        poorest = own[*pid];
        poorestid = *pid;
      }
-  assert(poorestid != -1);
+  assert(poorestid != neighborLimit);
   return poorestid;
 }
 
@@ -129,27 +130,42 @@ void balanceOwners(PtnMdl& pm) {
   Owners own;
   initOwners(pm,own);
   exchangeOwners(own,"init");
+  int totOwn = PCU_Add_Int(own[self]);
   int maxOwn = PCU_Max_Int(own[self]);
-  int maxPeers = PCU_Max_Int(own.size()-1);
   int iter = 0;
-  const int maxIter = 100;
-  const int ownershipLimit = maxPeers/2;
+  const int maxIter = 10;
+  const double avgOwn = static_cast<double>(totOwn/PCU_Comm_Peers());
+  double imbOwn = maxOwn/avgOwn;
+  const double imbTgt = 1.20;
+  const double heavyOwn = avgOwn*imbTgt;
+  const double diffusionFactor = 0.2;
   if( !PCU_Comm_Self() )
-    fprintf(stderr, "maxOwned %d maxPeers %d ownershipLimit %d maxIter %d\n", 
-        maxOwn, maxPeers, ownershipLimit, maxIter);
-  while( maxOwn > ownershipLimit && iter++ < maxIter ) {
+    fprintf(stderr, "max %d avg %.3f imbalance %.3f imbalanceTgt %.3f diffusionFactor %.3f maxIter %d\n",
+        maxOwn, avgOwn, imbOwn, imbTgt, diffusionFactor, maxIter);
+  while( imbOwn > imbTgt && iter++ < maxIter ) {
     PCU_Debug_Print("startiter %d\n", iter);
+    if( !PCU_Comm_Self() )
+      fprintf(stderr, "iter %d max %d imbalance %.3f\n", iter, maxOwn, imbOwn);
     PCU_Comm_Begin();
     //compute and send owner changes
-    APF_ITERATE(PtnMdl,pm,it) {
-      if( own[self] > ownershipLimit && it->second == self ) {
-        int newowner = poorestNeighbor(it->first,own);
-        printPtnMdlEnt("setting", it->first);
-        PCU_Debug_Print(" newowner %d\n", newowner);
-        it->second = newowner;
-        packRes(it->first,newowner);
-        own[self]--;
+    int sent = 0;
+    if( own[self] > heavyOwn ) {
+      const double sendLimit = (own[self]-heavyOwn)*diffusionFactor;
+      PCU_Debug_Print("sendLimit %.3f\n", sendLimit);
+      APF_ITERATE(PtnMdl,pm,it) {
+        if( it->second == self && sent <= sendLimit ) {
+          int newowner = poorestNeighbor(it->first,own);
+          printPtnMdlEnt("setting", it->first);
+          PCU_Debug_Print(" newowner %d\n", newowner);
+          it->second = newowner;
+          packRes(it->first,newowner);
+          own[self]--;
+          assert(own.count(newowner));
+          own[newowner]++;
+          sent++;
+        }
       }
+      PCU_Debug_Print("sent %d\n", sent);
     }
     PCU_Comm_Send();
     //recv the owner changes
@@ -171,14 +187,13 @@ void balanceOwners(PtnMdl& pm) {
     initOwners(pm,own);
     exchangeOwners(own);
     maxOwn = PCU_Max_Int(own[self]);
+    imbOwn = maxOwn/avgOwn;
     PCU_Debug_Print("owned %d\n", own[self]);
-    if( !PCU_Comm_Self() )
-      fprintf(stderr, "maxOwned %d\n", maxOwn);
     PCU_Debug_Print("enditer %d\n", iter);
   }
   if( !PCU_Comm_Self() )
-    fprintf(stderr, "maxOwned %d iter %d time %.3f\n", 
-        maxOwn, iter, PCU_Time()-t0);
+    fprintf(stderr, "iter %d max %d imbalance %.3f time %.3f\n",
+        iter, maxOwn, imbOwn, PCU_Time()-t0);
 }
 
 struct BalancedSharing : public apf::Sharing
