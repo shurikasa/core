@@ -211,7 +211,7 @@ struct BalancedSharing : public apf::Sharing
   bool isOwned(apf::MeshEntity* e) {
     apf::Parts res;
     mesh->getResidence(e,res);
-    return pm[res];
+    return (pm[res] == PCU_Comm_Self());
   }
   void getCopies(apf::MeshEntity* e,
       apf::CopyArray& copies)
@@ -231,7 +231,6 @@ struct PhastaSharing : public apf::Sharing {
   {
     mesh = m;
     helper = apf::getSharing(m);
-    BalancedSharing bs(m);
   }
   ~PhastaSharing()
   {
@@ -285,7 +284,8 @@ struct PhastaSharing : public apf::Sharing {
 
 void getLinks(apf::Mesh* m, int dim, Links& links)
 {
-  PhastaSharing shr(m);
+  BalancedSharing shr(m);
+  //PhastaSharing shr(m);
   PCU_Comm_Begin();
   apf::MeshIterator* it = m->begin(dim);
   apf::MeshEntity* v;
