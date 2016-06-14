@@ -133,7 +133,7 @@ void balanceOwners(PtnMdl& pm) {
   int totOwn = PCU_Add_Int(own[self]);
   int maxOwn = PCU_Max_Int(own[self]);
   int iter = 0;
-  const int maxIter = 10;
+  const int maxIter = 30;
   const double avgOwn = static_cast<double>(totOwn/PCU_Comm_Peers());
   double imbOwn = maxOwn/avgOwn;
   const double imbTgt = 1.20;
