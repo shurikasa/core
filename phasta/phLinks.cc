@@ -150,6 +150,17 @@ int poorestNeighbor(const apf::Parts& res, const float taskLimit, const Tasks& i
   return poorestid;
 }
 
+void getMinSendPeer(Tasks& send, int& minSendPeer, int& minSends) {
+  minSendPeer = PCU_Comm_Peers();
+  minSends = 1024*1024;
+  APF_ITERATE(Tasks,send,s) {
+    if( s->second < minSends ) {
+      minSends = s->second;
+      minSendPeer = s->first;
+    }
+  }
+}
+
 /* returns the partition model with balanced ownership */
 void balanceOwners(PtnMdl& pm) {
   double t0 = PCU_Time();
@@ -181,14 +192,8 @@ void balanceOwners(PtnMdl& pm) {
           totTasks, maxTasks, maxIn, maxOut, iter);
     PCU_Comm_Begin();
     if( out.at(self) > idealTasks ) {
-      int minSendPeer = PCU_Comm_Peers();
-      int minSends = maxPeers;
-      APF_ITERATE(Tasks,send,s) {
-        if( s->second < minSends ) {
-          minSends = s->second;
-          minSendPeer = s->first;
-        }
-      }
+      int minSendPeer, minSends;
+      getMinSendPeer(send,minSendPeer,minSends);
       PCU_Debug_Print("out %d minSendPeer %d minSends %d\n", out.at(self), minSendPeer, minSends);
       int sent = 0;
       APF_ITERATE(PtnMdl,pm,it) {
