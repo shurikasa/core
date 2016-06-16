@@ -16,6 +16,7 @@ bool LinkKey::operator<(LinkKey const& other) const
 
 typedef std::map<apf::Parts,int> PtnMdl;
 typedef std::map<int,int> Tasks;
+typedef std::map<int,std::set<int> > PeerTasks;
 
 void printPtnMdlEnt(const char* key, const apf::Parts& pme) {
   PCU_Debug_Print("%s pme ", key);
@@ -97,6 +98,32 @@ void exchangeTasks(Tasks& tasks) {
   }
 }
 
+/* exchange the list of outbound comm tasks */
+void exchangeOutTasks(Tasks& out, Tasks& send, PeerTasks& peerOut) {
+  const int self = PCU_Comm_Self();
+  int* peersSentTo = new int[send.size()];
+  int i = 0;
+  APF_ITERATE(Tasks,send,it) {
+    peersSentTo[i++] = it->first;
+  PCU_Comm_Begin();
+  //send the list of outbound comm tasks
+  APF_ITERATE(Tasks,out,it) {
+    int peer = it->first;
+    PCU_COMM_PACK(peer, sz);
+    PCU_Comm_Pack(peer, peersSentTo, sizeof(int)*send.size());
+  }
+  PCU_Comm_Send();
+  //recv the neighbors outbound comm task list
+  while (PCU_Comm_Listen()) {
+    int peer = PCU_Comm_Sender();
+    while (!PCU_Comm_Unpacked()) {
+      //TODO - write this!!!
+    }
+  }
+  delete [] peersSentTo;
+}
+
+
 /* send the new owner of the partition model entity to all parts
    bounded by the entity (the resident set 'res') */
 void packRes(const apf::Parts& res, int newowner) {
@@ -129,12 +156,12 @@ void unpackRes(apf::Parts& res, int& newowner) {
   delete [] resArray;
 }
 
-int poorestNeighbor(const apf::Parts& res, const float taskLimit, const Tasks& in, Tasks& out) {
+int poorestNeighbor(const apf::Parts& res, const float taskLimit, Tasks& out) {
   const int self = PCU_Comm_Self();
   int poorest = 10000;
   int poorestid = -1;
   for (apf::Parts::iterator pid = res.begin(); pid != res.end(); pid++) {
-    const int tasks = out.at(*pid) + in.at(*pid);
+    const int tasks = out.at(*pid);
     if( *pid != self && 
         tasks < poorest && 
         out.at(*pid) < taskLimit) {
@@ -202,7 +229,7 @@ void balanceOwners(PtnMdl& pm) {
         PtnMdl toSend;
         APF_ITERATE(PtnMdl,pm,it) {
           if( it->second == self && it->first.count(minSendPeer) ) {
-            int newowner = poorestNeighbor(it->first,idealTasks,in,out);
+            int newowner = poorestNeighbor(it->first,idealTasks,out);
             if( newowner != -1 ) {
               assert(newowner != -1);
               toSend[it->first] = newowner;
