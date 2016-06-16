@@ -14,7 +14,7 @@ bool LinkKey::operator<(LinkKey const& other) const
 }
 
 typedef std::map<apf::Parts,int> PtnMdl;
-typedef std::map<int,int> Owners;
+typedef std::map<int,int> Tasks;
 
 void printPtnMdlEnt(const char* key, const apf::Parts& pme) {
   PCU_Debug_Print("%s pme ", key);
@@ -46,35 +46,35 @@ void getPtnMdl(apf::Mesh* m, PtnMdl& pm) {
     pm[it->first] = *(it->first.begin());
 }
 
-void initOwners(PtnMdl& pm, Owners& own) {
+void initTasks(PtnMdl& pm, Tasks& tasks) {
   const int self = PCU_Comm_Self();
   APF_ITERATE(PtnMdl,pm,it)
     for (apf::Parts::iterator pid = it->first.begin(); pid != it->first.end(); pid++)
-      own[*pid] = 0; //need to know that the peer exists
+      tasks[*pid] = 0; //need to know that the peer exists
   APF_ITERATE(PtnMdl,pm,it) {
     if( it->second == self )
-      own[self]++;
+      tasks[self]++;
   }
 }
 
 /* exchange the number of owned partition model entities with neighbors */
-void exchangeOwners(Owners& own, const char* key="update") {
+void exchangeTasks(Tasks& tasks, const char* key="update") {
   const int self = PCU_Comm_Self();
   PCU_Comm_Begin();
   //send the number of owned partition model ents
-  APF_ITERATE(Owners,own,it)
-    PCU_COMM_PACK(it->first, own[self]);
+  APF_ITERATE(Tasks,tasks,it)
+    PCU_COMM_PACK(it->first, tasks[self]);
   PCU_Comm_Send();
   //recv the neighbors owned partition model ents counts
   while (PCU_Comm_Listen()) {
     int peer = PCU_Comm_Sender();
     int ownCnt = 0;
     PCU_COMM_UNPACK(ownCnt);
-    own[peer] = ownCnt;
+    tasks[peer] = ownCnt;
   }
-  APF_ITERATE(Owners,own,it)
+  APF_ITERATE(Tasks,tasks,it)
     PCU_Debug_Print("%s peer %d owns %d\n", key, it->first, it->second);
-  PCU_Debug_Print("%s owned %d\n", key, own[self]);
+  PCU_Debug_Print("%s owned %d\n", key, tasks[self]);
 }
 
 /* send the new owner of the partition model entity to all parts
@@ -109,13 +109,13 @@ void unpackRes(apf::Parts& res, int& newowner) {
   delete [] resArray;
 }
 
-int poorestNeighbor(const apf::Parts& res, Owners& own) {
+int poorestNeighbor(const apf::Parts& res, Tasks& tasks) {
   const int neighborLimit = 10000;
   int poorest = neighborLimit;
   int poorestid = -1;
   for (apf::Parts::iterator pid = res.begin(); pid != res.end(); pid++)
-     if( *pid != PCU_Comm_Self() && own[*pid] < poorest ) {
-       poorest = own[*pid];
+     if( *pid != PCU_Comm_Self() && tasks[*pid] < poorest ) {
+       poorest = tasks[*pid];
        poorestid = *pid;
      }
   assert(poorestid != neighborLimit);
@@ -127,11 +127,11 @@ void balanceOwners(PtnMdl& pm) {
   double t0 = PCU_Time();
   const int self = PCU_Comm_Self();
   printPtnMdl("init",pm);
-  Owners own;
-  initOwners(pm,own);
-  exchangeOwners(own,"init");
-  int totOwn = PCU_Add_Int(own[self]);
-  int maxOwn = PCU_Max_Int(own[self]);
+  Tasks tasks;
+  initTasks(pm,tasks);
+  exchangeTasks(tasks,"init");
+  int totOwn = PCU_Add_Int(tasks[self]);
+  int maxOwn = PCU_Max_Int(tasks[self]);
   int iter = 0;
   const int maxIter = 30;
   const double avgOwn = static_cast<double>(totOwn/PCU_Comm_Peers());
@@ -149,19 +149,19 @@ void balanceOwners(PtnMdl& pm) {
     PCU_Comm_Begin();
     //compute and send owner changes
     int sent = 0;
-    if( own[self] > heavyOwn ) {
-      const double sendLimit = (own[self]-heavyOwn)*diffusionFactor;
+    if( tasks[self] > heavyOwn ) {
+      const double sendLimit = (tasks[self]-heavyOwn)*diffusionFactor;
       PCU_Debug_Print("sendLimit %.3f\n", sendLimit);
       APF_ITERATE(PtnMdl,pm,it) {
         if( it->second == self && sent <= sendLimit ) {
-          int newowner = poorestNeighbor(it->first,own);
+          int newowner = poorestNeighbor(it->first,tasks);
           printPtnMdlEnt("setting", it->first);
           PCU_Debug_Print(" newowner %d\n", newowner);
           it->second = newowner;
           packRes(it->first,newowner);
-          own[self]--;
-          assert(own.count(newowner));
-          own[newowner]++;
+          tasks[self]--;
+          assert(tasks.count(newowner));
+          tasks[newowner]++;
           sent++;
         }
       }
@@ -184,11 +184,11 @@ void balanceOwners(PtnMdl& pm) {
       }
     }
     printPtnMdl("update",pm);
-    initOwners(pm,own);
-    exchangeOwners(own);
-    maxOwn = PCU_Max_Int(own[self]);
+    initTasks(pm,tasks);
+    exchangeTasks(tasks);
+    maxOwn = PCU_Max_Int(tasks[self]);
     imbOwn = maxOwn/avgOwn;
-    PCU_Debug_Print("owned %d\n", own[self]);
+    PCU_Debug_Print("owned %d\n", tasks[self]);
     PCU_Debug_Print("enditer %d\n", iter);
   }
   if( !PCU_Comm_Self() )
