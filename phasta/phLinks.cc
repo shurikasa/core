@@ -3,6 +3,7 @@
 #include "phAdjacent.h"
 #include <apf.h>
 #include <cassert>
+#include <cstdlib>
 
 namespace ph {
 
@@ -46,15 +47,27 @@ void getPtnMdl(apf::Mesh* m, PtnMdl& pm) {
     pm[it->first] = *(it->first.begin());
 }
 
-void initTasks(PtnMdl& pm, Tasks& tasks) {
+void initTasks(PtnMdl& pm, Tasks& in, Tasks& out) {
   const int self = PCU_Comm_Self();
   APF_ITERATE(PtnMdl,pm,it)
     for (apf::Parts::iterator pid = it->first.begin(); pid != it->first.end(); pid++)
-      tasks[*pid] = 0; //need to know that the peer exists
+      in[*pid] = out[*pid] = 0; //need to know that the peer exists
+  //count the outbound comm tasks
+  std::set<int> peers;
   APF_ITERATE(PtnMdl,pm,it) {
     if( it->second == self )
-      tasks[self]++;
+      for (apf::Parts::iterator pid = it->first.begin(); pid != it->first.end(); pid++)
+        if( *pid != self )
+          peers.insert(*pid);
   }
+  out[self] = peers.size();
+  //count the inbound comm tasks
+  peers.clear();
+  APF_ITERATE(PtnMdl,pm,it)
+    if( it->second != self )
+      peers.insert(it->second);
+  in[self] = peers.size();
+  PCU_Debug_Print("in %d out %d\n",in[self],out[self]);
 }
 
 /* exchange the number of owned partition model entities with neighbors */
@@ -73,7 +86,7 @@ void exchangeTasks(Tasks& tasks, const char* key="update") {
     tasks[peer] = ownCnt;
   }
   APF_ITERATE(Tasks,tasks,it)
-    PCU_Debug_Print("%s peer %d owns %d\n", key, it->first, it->second);
+    PCU_Debug_Print("%s peer %d tasks %d\n", key, it->first, it->second);
   PCU_Debug_Print("%s owned %d\n", key, tasks[self]);
 }
 
@@ -127,45 +140,42 @@ void balanceOwners(PtnMdl& pm) {
   double t0 = PCU_Time();
   const int self = PCU_Comm_Self();
   printPtnMdl("init",pm);
-  Tasks tasks;
-  initTasks(pm,tasks);
-  exchangeTasks(tasks,"init");
-  int totOwn = PCU_Add_Int(tasks[self]);
-  int maxOwn = PCU_Max_Int(tasks[self]);
+  Tasks in, out;
+  initTasks(pm,in,out);
+  exchangeTasks(in,"init-in");
+  exchangeTasks(out,"init-out");
+  int totTasks = PCU_Add_Int(in[self]+out[self]);
+  int bias = in[self]-out[self];
+  int maxBias = PCU_Max_Int(abs(bias));
+  int maxIn = PCU_Max_Int(in[self]);
+  int maxOut = PCU_Max_Int(out[self]);
+  const int peers = in.size()-1;
+  const int maxPeers = PCU_Max_Int(peers);
+  const float idealTasks = maxPeers/2;
   int iter = 0;
-  const int maxIter = 30;
-  const double avgOwn = static_cast<double>(totOwn/PCU_Comm_Peers());
-  double imbOwn = maxOwn/avgOwn;
-  const double imbTgt = 1.20;
-  const double heavyOwn = avgOwn*imbTgt;
-  const double diffusionFactor = 0.2;
+  const int maxIter = maxPeers*2;
   if( !PCU_Comm_Self() )
-    fprintf(stderr, "max %d avg %.3f imbalance %.3f imbalanceTgt %.3f diffusionFactor %.3f maxIter %d\n",
-        maxOwn, avgOwn, imbOwn, imbTgt, diffusionFactor, maxIter);
-  while( imbOwn > imbTgt && iter++ < maxIter ) {
+    fprintf(stderr, "maxIn %d maxOut %d idealTasks %.3f maxIter %d\n",
+        maxIn, maxOut, idealTasks, maxIter);
+  while( (maxIn > idealTasks || maxOut > idealTasks) && iter++ < maxIter ) {
     PCU_Debug_Print("startiter %d\n", iter);
     if( !PCU_Comm_Self() )
-      fprintf(stderr, "iter %d max %d imbalance %.3f\n", iter, maxOwn, imbOwn);
+      fprintf(stderr, "totTasks %d maxBias %d maxIn %d maxOut %d iter %d\n",
+          totTasks, maxBias, maxIn, maxOut, iter);
     PCU_Comm_Begin();
-    //compute and send owner changes
-    int sent = 0;
-    if( tasks[self] > heavyOwn ) {
-      const double sendLimit = (tasks[self]-heavyOwn)*diffusionFactor;
-      PCU_Debug_Print("sendLimit %.3f\n", sendLimit);
+    // bias is less than zero when there are more outbound than inbound tasks.
+    // Since owned ptn mdl ents create outbound tasks, we will reassign their
+    // ownership to a neighbor that has the fewest outbound tasks.
+    if( abs(bias) == maxBias && bias < 0 ) {
       APF_ITERATE(PtnMdl,pm,it) {
-        if( it->second == self && sent <= sendLimit ) {
-          int newowner = poorestNeighbor(it->first,tasks);
+        if( it->second == self ) {
+          int newowner = poorestNeighbor(it->first,out);
           printPtnMdlEnt("setting", it->first);
           PCU_Debug_Print(" newowner %d\n", newowner);
           it->second = newowner;
           packRes(it->first,newowner);
-          tasks[self]--;
-          assert(tasks.count(newowner));
-          tasks[newowner]++;
-          sent++;
         }
       }
-      PCU_Debug_Print("sent %d\n", sent);
     }
     PCU_Comm_Send();
     //recv the owner changes
@@ -184,16 +194,19 @@ void balanceOwners(PtnMdl& pm) {
       }
     }
     printPtnMdl("update",pm);
-    initTasks(pm,tasks);
-    exchangeTasks(tasks);
-    maxOwn = PCU_Max_Int(tasks[self]);
-    imbOwn = maxOwn/avgOwn;
-    PCU_Debug_Print("owned %d\n", tasks[self]);
+    initTasks(pm,in,out);
+    exchangeTasks(in);
+    exchangeTasks(out);
+    maxIn = PCU_Max_Int(in[self]);
+    maxOut = PCU_Max_Int(out[self]);
+    totTasks = PCU_Add_Int(in[self]+out[self]);
+    bias = in[self]-out[self];
+    maxBias = PCU_Max_Int(abs(bias));
     PCU_Debug_Print("enditer %d\n", iter);
   }
   if( !PCU_Comm_Self() )
-    fprintf(stderr, "iter %d max %d imbalance %.3f time %.3f\n",
-        iter, maxOwn, imbOwn, PCU_Time()-t0);
+    fprintf(stderr, "totTasks %d maxBias %d maxIn %d maxOut %d iter %d time %.3f\n",
+        totTasks, maxBias, maxIn, maxOut, iter, PCU_Time()-t0);
 }
 
 struct BalancedSharing : public apf::Sharing
