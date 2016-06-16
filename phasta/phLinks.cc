@@ -135,8 +135,6 @@ int poorestNeighbor(const apf::Parts& res, const float taskLimit, const Tasks& i
   int poorestid = -1;
   for (apf::Parts::iterator pid = res.begin(); pid != res.end(); pid++) {
     const int tasks = out.at(*pid) + in.at(*pid);
-    PCU_Debug_Print("candidate %d tasks %d out %d\n",
-        *pid, tasks, out.at(*pid));
     if( *pid != self && 
         tasks < poorest && 
         out.at(*pid) < taskLimit) {
@@ -150,15 +148,18 @@ int poorestNeighbor(const apf::Parts& res, const float taskLimit, const Tasks& i
   return poorestid;
 }
 
-void getMinSendPeer(Tasks& send, int& minSendPeer, int& minSends) {
-  minSendPeer = PCU_Comm_Peers();
-  minSends = 1024*1024;
-  APF_ITERATE(Tasks,send,s) {
-    if( s->second < minSends ) {
-      minSends = s->second;
-      minSendPeer = s->first;
-    }
+void getSortedSendPeers(Tasks& send, int* sorted) {
+  typedef std::multimap<int,int> mmii;
+  mmii sendSort;
+  APF_ITERATE(Tasks,send,s)
+    sendSort.insert(std::pair<int,int>(s->second,s->first));
+  int i=0;
+  PCU_Debug_Print("sorted sends");
+  APF_ITERATE(mmii,sendSort,s) {
+    sorted[i++] = s->second;
+    PCU_Debug_Print(" %d,%d ", s->second, s->first);
   }
+  PCU_Debug_Print("\n");
 }
 
 /* returns the partition model with balanced ownership */
@@ -186,30 +187,41 @@ void balanceOwners(PtnMdl& pm) {
         maxIn, maxOut, idealTasks, maxIter);
   while( (maxIn > idealTasks || maxOut > idealTasks) && iter++ < maxIter ) {
     PCU_Debug_Print("startiter %d\n", iter);
-    PCU_Debug_Print("tasks %d\n", tasks);
     if( !PCU_Comm_Self() )
       fprintf(stderr, "totTasks %d maxTasks %d maxIn %d maxOut %d iter %d\n",
           totTasks, maxTasks, maxIn, maxOut, iter);
     PCU_Comm_Begin();
-    if( out.at(self) > idealTasks ) {
-      int minSendPeer, minSends;
-      getMinSendPeer(send,minSendPeer,minSends);
-      PCU_Debug_Print("out %d minSendPeer %d minSends %d\n", out.at(self), minSendPeer, minSends);
-      int sent = 0;
-      APF_ITERATE(PtnMdl,pm,it) {
-        if( it->second == self && it->first.count(minSendPeer) ) {
-          int newowner = poorestNeighbor(it->first,idealTasks,in,out);
-          if( newowner != -1 ) {
-            assert(newowner != -1);
-            printPtnMdlEnt("setting", it->first);
-            PCU_Debug_Print(" newowner %d\n", newowner);
-            it->second = newowner;
-            packRes(it->first,newowner);
-            sent++;
+    if( out.at(self) == maxOut ) {
+      int* sortedSendPeers = new int[send.size()];
+      getSortedSendPeers(send,sortedSendPeers);
+      for(size_t i=0; i<send.size(); i++) {
+        int minSendPeer = sortedSendPeers[i];
+        int minSends = send[sortedSendPeers[i]];
+        PCU_Debug_Print("out %d minSendPeer %d minSends %d\n", out.at(self), minSendPeer, minSends);
+        int sent = 0;
+        PtnMdl toSend;
+        APF_ITERATE(PtnMdl,pm,it) {
+          if( it->second == self && it->first.count(minSendPeer) ) {
+            int newowner = poorestNeighbor(it->first,idealTasks,in,out);
+            if( newowner != -1 ) {
+              assert(newowner != -1);
+              toSend[it->first] = newowner;
+              sent++;
+            }
           }
         }
+        PCU_Debug_Print("minSends %d sent %d\n", minSends, sent);
+        if( sent == minSends ) {
+          APF_ITERATE(PtnMdl,toSend,it) {
+            printPtnMdlEnt("setting", it->first);
+            PCU_Debug_Print(" newowner %d\n", it->second);
+            pm[it->first] = it->second; //change owner
+            packRes(it->first,it->second);
+          }
+          break;
+        }
       }
-      PCU_Debug_Print("minSends %d sent %d\n", minSends, sent);
+      delete [] sortedSendPeers;
     }
     PCU_Comm_Send();
     //recv the owner changes
