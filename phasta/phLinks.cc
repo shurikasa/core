@@ -211,9 +211,9 @@ int pickNewOwner(const apf::Parts& res, int taskLimit, Tasks& out, PeerTasks& pt
       bestCandidate = *candidate;
     }
   }
-  PCU_Debug_Print("bestMatch %lu out[bestCandidate] %d\n", bestMatch, out[bestCandidate]);
-  if(out[bestCandidate] < taskLimit ) {
-    const size_t canAccept = taskLimit - out[bestCandidate];
+  PCU_Debug_Print("bestMatch %lu bestCandidate %d\n", bestMatch, bestCandidate);
+  if(bestCandidate != -1 && out.at(bestCandidate) < taskLimit) {
+    const size_t canAccept = taskLimit - out.at(bestCandidate);
     PCU_Debug_Print("canAccept %lu\n", canAccept);
     if(canAccept > bestMatch) {
       PCU_Debug_Print("newowner %d\n", bestCandidate);
