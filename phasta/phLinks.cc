@@ -25,6 +25,12 @@ void printPtnMdlEnt(const char* key, const apf::Parts& pme) {
   }
 }
 
+void printPeerTask(const char* key, std::set<int>& tasks) {
+  PCU_Debug_Print("%s sends-to-peer ", key);
+  for (apf::Parts::iterator pid = tasks.begin(); pid != tasks.end(); pid++)
+    PCU_Debug_Print("%d ", *pid);
+}
+
 void printPtnMdl(const char* key, PtnMdl& pm) {
   APF_ITERATE(PtnMdl,pm,it) {
     printPtnMdlEnt(key,it->first);
@@ -172,23 +178,40 @@ void unpackRes(apf::Parts& res, int& newowner) {
   delete [] resArray;
 }
 
-int poorestNeighbor(const apf::Parts& res, const float taskLimit, Tasks& out) {
+/* check to see if there exists a peer with outbound tasks s.t. assigning the
+ * peer ownership of the ptn mdl ent does not create additional outbound tasks*/
+int poorestNeighbor(const apf::Parts& res, PeerTasks& pt) {
   const int self = PCU_Comm_Self();
-  int poorest = 10000;
-  int poorestid = -1;
-  for (apf::Parts::iterator pid = res.begin(); pid != res.end(); pid++) {
-    const int tasks = out.at(*pid);
-    if( *pid != self && 
-        tasks < poorest && 
-        out.at(*pid) < taskLimit) {
-      poorest = tasks;
-      poorestid = *pid;
+  int newowner = -1;
+  //loop over possible new owners ('candidate') for the ptn mdl ent
+  for (apf::Parts::iterator candidate = res.begin();
+      candidate != res.end();
+      candidate++) {
+    size_t found = 0;
+    //the new owner can't be the current owner
+    if( *candidate == self ) continue;
+    if( ! pt.count(*candidate) ) continue;
+    PCU_Debug_Print("candidate %d\n", *candidate);
+    printPtnMdlEnt("checking", res);
+    printPeerTask("against", pt.at(*candidate));
+    PCU_Debug_Print("\n");
+    //check if the candidate has the needed outbound tasks
+    for (apf::Parts::iterator pid = res.begin();
+        pid != res.end();
+        pid++) {
+      found += pt.at(*candidate).count(*pid);
+    }
+    printPtnMdlEnt("checking", res);
+    printPtnMdlEnt("against", pt.at(*candidate));
+    PCU_Debug_Print("candidate %d found %lu of %lu\n", *candidate, found, res.size()-1);
+    if( found == res.size()-1 ) {
+      newowner = *candidate;
+      break;
     }
   }
-  if( poorestid != -1 )
-    PCU_Debug_Print("newowner %d tasks %d out %d\n",
-        poorestid, poorest, out.at(poorestid));
-  return poorestid;
+  if( newowner != -1 )
+    PCU_Debug_Print("newowner %d\n", newowner);
+  return newowner;
 }
 
 void getSortedSendPeers(Tasks& send, int* sorted) {
@@ -248,7 +271,7 @@ void balanceOwners(PtnMdl& pm) {
         PtnMdl toSend;
         APF_ITERATE(PtnMdl,pm,it) {
           if( it->second == self && it->first.count(minSendPeer) ) {
-            int newowner = poorestNeighbor(it->first,idealTasks,out);
+            int newowner = poorestNeighbor(it->first,pt);
             if( newowner != -1 ) {
               assert(newowner != -1);
               toSend[it->first] = newowner;
