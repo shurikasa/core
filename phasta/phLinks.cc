@@ -75,9 +75,9 @@ void initTasks(PtnMdl& pm, Tasks& in, Tasks& out, Tasks& send, Tasks& recv) {
   PCU_Debug_Print("in %d out %d\n",in[self],out[self]);
 }
 
-void printTasks(Tasks& tasks, const char* type, const char* key="") {
+void printTasks(Tasks& tasks, const char* key="") {
   APF_ITERATE(Tasks,tasks,it)
-    PCU_Debug_Print("%s peer %d %s-tasks %d\n", key, it->first, type, it->second);
+    PCU_Debug_Print("%s peer %d over %d links\n", key, it->first, it->second);
 }
 
 /* exchange the number of owned partition model entities with neighbors */
@@ -98,27 +98,43 @@ void exchangeTasks(Tasks& tasks) {
   }
 }
 
+void printPeerTasks(PeerTasks& pt, const char* key="") {
+  APF_ITERATE(PeerTasks,pt,it) {
+    PCU_Debug_Print("%s peer %d sends-to-peer", key, it->first);
+    std::set<int>& task = it->second;
+    for (std::set<int>::iterator pid = task.begin(); pid != task.end(); pid++)
+      PCU_Debug_Print(" %d ", *pid);
+    PCU_Debug_Print("\n");
+  }
+}
+
 /* exchange the list of outbound comm tasks */
-void exchangeOutTasks(Tasks& out, Tasks& send, PeerTasks& peerOut) {
-  const int self = PCU_Comm_Self();
+void exchangeSendTasks(Tasks& out, Tasks& send, PeerTasks& peerOut) {
+  peerOut.clear();
   int* peersSentTo = new int[send.size()];
   int i = 0;
-  APF_ITERATE(Tasks,send,it) {
+  APF_ITERATE(Tasks,send,it)
     peersSentTo[i++] = it->first;
   PCU_Comm_Begin();
   //send the list of outbound comm tasks
   APF_ITERATE(Tasks,out,it) {
     int peer = it->first;
-    PCU_COMM_PACK(peer, sz);
+    if(peer == PCU_Comm_Self() ) continue;
+    int size = send.size();
+    PCU_COMM_PACK(peer, size);
     PCU_Comm_Pack(peer, peersSentTo, sizeof(int)*send.size());
   }
   PCU_Comm_Send();
   //recv the neighbors outbound comm task list
   while (PCU_Comm_Listen()) {
     int peer = PCU_Comm_Sender();
-    while (!PCU_Comm_Unpacked()) {
-      //TODO - write this!!!
-    }
+    int size = 0;
+    PCU_COMM_UNPACK(size);
+    int* outcomm = new int[size];
+    PCU_Comm_Unpack(outcomm, sizeof(int)*size);
+    for(int i=0; i<size; i++)
+      peerOut[peer].insert(outcomm[i]);
+    delete [] outcomm;
   }
   delete [] peersSentTo;
 }
@@ -196,9 +212,12 @@ void balanceOwners(PtnMdl& pm) {
   printPtnMdl("init",pm);
   Tasks in, out, send, recv;
   initTasks(pm,in,out,send,recv);
-  printTasks(send,"send");
+  printTasks(send,"sending to");
   exchangeTasks(in);
   exchangeTasks(out);
+  PeerTasks pt;
+  exchangeSendTasks(out,send,pt);
+  printPeerTasks(pt);
   int tasks = in[self]+out[self];
   int totTasks = PCU_Add_Int(tasks);
   int maxTasks = PCU_Max_Int(tasks);
@@ -268,9 +287,11 @@ void balanceOwners(PtnMdl& pm) {
     }
     printPtnMdl("update",pm);
     initTasks(pm,in,out,send,recv);
-    printTasks(send,"send");
+    printTasks(send,"sending to");
     exchangeTasks(in);
     exchangeTasks(out);
+    exchangeSendTasks(out,send,pt);
+    printPeerTasks(pt);
     maxIn = PCU_Max_Int(in[self]);
     maxOut = PCU_Max_Int(out[self]);
     tasks = in[self]+out[self];
