@@ -313,7 +313,7 @@ void balanceOwners(PtnMdl& pm) {
         PtnMdl toSend;
         APF_ITERATE(PtnMdl,pm,it) {
           if( it->second == self && it->first.count(minSendPeer) ) {
-            int newowner = pickNewOwner(it->first,idealTasks,out,pt);
+            int newowner = pickNewOwner(it->first,maxOut-1,out,pt);
             if( newowner != -1 ) {
               assert(newowner != -1);
               toSend[it->first] = newowner;
