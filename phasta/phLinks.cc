@@ -50,7 +50,24 @@ void getPtnMdl(apf::Mesh* m, PtnMdl& pm) {
     }
   }
 }
-
+/**
+ * This function sets the following vars:
+ * in[self] = number of inbound comm tasks 
+ *   for each un-owned ptn mdl ent
+ *   there is an inbound communication 
+ *   from the remote owner
+ * out[self] = number of outbound comm tasks 
+ *   for each owned ptn mdl ent there
+ *   is an outbound communicaton to each
+ *   part in the resident set of the ent.  
+ *   this is described as 'fan-out'; one-to-many.
+ * send[neighbor] = number of (owned) ptn mdl 
+ *   ents that require outbound communications to 
+ *   neighbor
+ * recv[neighbor] = number of (un-owned) ptn mdl 
+ *   ents that require inbound communications from 
+ *   neighbor
+ */
 void initTasks(PtnMdl& pm, Tasks& in, Tasks& out, Tasks& send, Tasks& recv) {
   send.clear();
   recv.clear();
@@ -61,9 +78,10 @@ void initTasks(PtnMdl& pm, Tasks& in, Tasks& out, Tasks& send, Tasks& recv) {
   //count the outbound comm tasks
   std::set<int> peers;
   APF_ITERATE(PtnMdl,pm,it) {
-    if( it->second == self )
+    if( it->second == self ) //owner of the ptn mdl ent
       for (apf::Parts::iterator pid = it->first.begin(); pid != it->first.end(); pid++)
         if( *pid != self ) {
+          //there is an outbound comm with each part in the resident set
           peers.insert(*pid);
           send[*pid]++;
         }
@@ -73,6 +91,7 @@ void initTasks(PtnMdl& pm, Tasks& in, Tasks& out, Tasks& send, Tasks& recv) {
   peers.clear();
   APF_ITERATE(PtnMdl,pm,it) {
     if( it->second != self ) {
+      //there is an inbound comm from the owner of the ptn mdl ent
       peers.insert(it->second);
       recv[it->second]++;
     }
@@ -114,7 +133,8 @@ void printPeerTasks(PeerTasks& pt, const char* key="") {
   }
 }
 
-/* exchange the list of outbound comm tasks */
+/* peerOut[i] will contain the list of part ids that part i sends to
+ */
 void exchangeSendTasks(Tasks& out, Tasks& send, PeerTasks& peerOut) {
   peerOut.clear();
   int* peersSentTo = new int[send.size()];
@@ -122,7 +142,7 @@ void exchangeSendTasks(Tasks& out, Tasks& send, PeerTasks& peerOut) {
   APF_ITERATE(Tasks,send,it)
     peersSentTo[i++] = it->first;
   PCU_Comm_Begin();
-  //send the list of outbound comm tasks
+  //send the list of parts self sends to
   APF_ITERATE(Tasks,out,it) {
     int peer = it->first;
     if(peer == PCU_Comm_Self() ) continue;
@@ -131,7 +151,7 @@ void exchangeSendTasks(Tasks& out, Tasks& send, PeerTasks& peerOut) {
     PCU_Comm_Pack(peer, peersSentTo, sizeof(int)*send.size());
   }
   PCU_Comm_Send();
-  //recv the neighbors outbound comm task list
+  //recv the neighbors list of parts it sends to
   while (PCU_Comm_Listen()) {
     int peer = PCU_Comm_Sender();
     int size = 0;
@@ -243,7 +263,10 @@ void balanceOwners(PtnMdl& pm) {
   double t0 = PCU_Time();
   const int self = PCU_Comm_Self();
   printPtnMdl("init",pm);
-  Tasks in, out, send, recv;
+  Tasks in;    //in[i] = number of inbound tasks to rank i (i=self is the only one used...)
+  Tasks out;   //out[i] = number of outbound tasks from rank i
+  Tasks send;  //send[i] = number of ptn mdl ents that require outbound communications to rank i
+  Tasks recv;  //recv[i] = number of ptn mdl ents that require inbound communications from rank i
   initTasks(pm,in,out,send,recv);
   printTasks(send,"sending to");
   exchangeTasks(in);
@@ -260,7 +283,7 @@ void balanceOwners(PtnMdl& pm) {
   const int maxPeers = PCU_Max_Int(peers);
   const float idealTasks = maxPeers/2;
   int iter = 0;
-  const int maxIter = 5; //maxPeers*2;
+  const int maxIter = 50; //maxPeers*2;
   if( !PCU_Comm_Self() )
     fprintf(stderr, "maxIn %d maxOut %d idealTasks %.3f maxIter %d\n",
         maxIn, maxOut, idealTasks, maxIter);
@@ -341,7 +364,7 @@ struct BalancedSharing : public apf::Sharing
   BalancedSharing(apf::Mesh* m) {
     mesh = m;
     helper = apf::getSharing(m);
-    PCU_Debug_Open();
+    //PCU_Debug_Open();
     getPtnMdl(mesh,pm);
     balanceOwners(pm);
   }
