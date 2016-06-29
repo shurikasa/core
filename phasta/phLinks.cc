@@ -38,6 +38,15 @@ void printPtnMdl(const char* key, PtnMdl& pm) {
   }
 }
 
+int getMinRank(apf::Parts& res) {
+  int minrank = PCU_Comm_Peers();
+  APF_ITERATE(apf::Parts, res, pid)
+    if( *pid < minrank )
+      minrank = *pid;
+  assert(minrank != PCU_Comm_Peers());
+  return minrank;
+}
+
 /* returns the current partition model based on NormalSharing */
 void getPtnMdl(apf::Mesh* m, PtnMdl& pm) {
   apf::MeshIterator* it = m->begin(0);
@@ -46,7 +55,7 @@ void getPtnMdl(apf::Mesh* m, PtnMdl& pm) {
     if( m->isShared(e) ) {
       apf::Parts res;
       m->getResidence(e,res);
-      pm[res] = m->getOwner(e);
+      pm[res] = getMinRank(res);
     }
   }
 }
