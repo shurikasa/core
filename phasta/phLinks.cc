@@ -267,6 +267,15 @@ void getSortedSendPeers(Tasks& send, int* sorted) {
   PCU_Debug_Print("\n");
 }
 
+int countBidirectionalTasks(Tasks& send, Tasks& recv) {
+  int count = 0;
+  APF_ITERATE(Tasks,send,it)
+    if( it->second > 0 && recv.count(it->first) && recv.at(it->first) > 0 )
+      count++;
+  PCU_Debug_Print("bidir %d send %lu recv %lu\n", count, send.size(), recv.size());
+  return count;
+}
+
 /* returns the partition model with balanced ownership */
 void balanceOwners(PtnMdl& pm) {
   double t0 = PCU_Time();
@@ -278,6 +287,7 @@ void balanceOwners(PtnMdl& pm) {
   Tasks recv;  //recv[i] = number of ptn mdl ents that require inbound communications from rank i
   initTasks(pm,in,out,send,recv);
   printTasks(send,"sending to");
+  printTasks(recv,"receiving from");
   exchangeTasks(in);
   exchangeTasks(out);
   PeerTasks pt;
@@ -292,7 +302,7 @@ void balanceOwners(PtnMdl& pm) {
   const int maxPeers = PCU_Max_Int(peers);
   const float idealTasks = maxPeers/2;
   int iter = 0;
-  const int maxIter = 50; //maxPeers*2;
+  const int maxIter = 10; //maxPeers*2;
   if( !PCU_Comm_Self() )
     fprintf(stderr, "maxIn %d maxOut %d idealTasks %.3f maxIter %d\n",
         maxIn, maxOut, idealTasks, maxIter);
@@ -352,6 +362,7 @@ void balanceOwners(PtnMdl& pm) {
     printPtnMdl("update",pm);
     initTasks(pm,in,out,send,recv);
     printTasks(send,"sending to");
+    printTasks(recv,"receiving from");
     exchangeTasks(in);
     exchangeTasks(out);
     exchangeSendTasks(out,send,pt);
@@ -363,9 +374,11 @@ void balanceOwners(PtnMdl& pm) {
     maxTasks = PCU_Max_Int(tasks);
     PCU_Debug_Print("enditer %d\n", iter);
   }
+  int bidir = countBidirectionalTasks(send,recv);
+  bidir = PCU_Add_Int(bidir);
   if( !PCU_Comm_Self() )
-    fprintf(stderr, "totTasks %d maxTasks %d maxIn %d maxOut %d iter %d time %.3f\n",
-        totTasks, maxTasks, maxIn, maxOut, iter, PCU_Time()-t0);
+    fprintf(stderr, "totTasks %d maxTasks %d maxIn %d maxOut %d bidir %d iter %d time %.3f\n",
+        totTasks, maxTasks, maxIn, maxOut, bidir, iter, PCU_Time()-t0);
 }
 
 struct BalancedSharing : public apf::Sharing
@@ -373,7 +386,7 @@ struct BalancedSharing : public apf::Sharing
   BalancedSharing(apf::Mesh* m) {
     mesh = m;
     helper = apf::getSharing(m);
-    //PCU_Debug_Open();
+    PCU_Debug_Open();
     getPtnMdl(mesh,pm);
     balanceOwners(pm);
   }
