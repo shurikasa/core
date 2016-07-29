@@ -276,6 +276,69 @@ int countBidirectionalTasks(Tasks& send, Tasks& recv) {
   return count;
 }
 
+// Select ptn mdl ents for ownership re-assignment to eliminate outbound tasks
+// from the local part/process.
+void selectPMEtoSend(PtnMdl& pm, Tasks& send, Tasks& out, const int maxOut, PeerTasks& pt, PtnMdl& toSend) {
+  const int self = PCU_Comm_Self();
+  int* sortedSendPeers = new int[send.size()];
+  getSortedSendPeers(send,sortedSendPeers);
+  for(size_t i=0; i<send.size(); i++) {
+    // 'minSendPeer' has the fewest (in ascending order) number of ptn mdl 
+    //   ents forming the communication task between self and peer.
+    int minSendPeer = sortedSendPeers[i];
+    int minSends = send[minSendPeer];
+    PCU_Debug_Print("out %d minSendPeer %d minSends %d\n", out.at(self), minSendPeer, minSends);
+    int sent = 0;
+    // loop over the ptn mdl ents bounding the local part
+    APF_ITERATE(PtnMdl,pm,it) {
+      if( it->second == self && it->first.count(minSendPeer) ) {
+        // this part owns the ptn mdl ent and the minSendPeer is 
+        //  in the resident set of the ptn mdl ent
+        int newowner = pickNewOwner(it->first,maxOut-1,out,pt);
+        if( newowner != -1 ) {
+          assert(newowner != -1);
+          toSend[it->first] = newowner;
+          sent++;
+        }
+      }
+    }
+    PCU_Debug_Print("minSends %d sent %d\n", minSends, sent);
+    //only try to eliminate one outbound task
+    if(sent>0)
+      break;
+  }
+  delete [] sortedSendPeers;
+  //set the new owner of the ptn mdl ents before sending
+  APF_ITERATE(PtnMdl,toSend,it) {
+    printPtnMdlEnt("setting", it->first);
+    PCU_Debug_Print(" newowner %d\n", it->second);
+    pm[it->first] = it->second; //change owner
+  }
+}
+
+void sendPME(PtnMdl& toSend) {
+  APF_ITERATE(PtnMdl,toSend,it)
+    packRes(it->first,it->second);
+}
+
+void receivePME(PtnMdl& pm) {
+  //recv the owner changes
+  while (PCU_Comm_Listen()) {
+    int peer = PCU_Comm_Sender();
+    while (!PCU_Comm_Unpacked()) {
+      apf::Parts res;
+      int newowner = -1;
+      unpackRes(res,newowner);
+      printPtnMdlEnt("getting", res);
+      PCU_Debug_Print(" newowner %d from peer %d\n", newowner, peer);
+      assert(newowner != -1);
+      assert(res.size() > 1);
+      assert(pm.count(res));
+      pm[res] = newowner;
+    }
+  }
+}
+
 /* returns the partition model with balanced ownership */
 void balanceOwners(PtnMdl& pm) {
   double t0 = PCU_Time();
@@ -311,54 +374,15 @@ void balanceOwners(PtnMdl& pm) {
     if( !PCU_Comm_Self() )
       fprintf(stderr, "totTasks %d maxTasks %d maxIn %d maxOut %d iter %d\n",
           totTasks, maxTasks, maxIn, maxOut, iter);
+
     PCU_Comm_Begin();
-    if( out.at(self) == maxOut ) {
-      int* sortedSendPeers = new int[send.size()];
-      getSortedSendPeers(send,sortedSendPeers);
-      for(size_t i=0; i<send.size(); i++) {
-        int minSendPeer = sortedSendPeers[i];
-        int minSends = send[sortedSendPeers[i]];
-        PCU_Debug_Print("out %d minSendPeer %d minSends %d\n", out.at(self), minSendPeer, minSends);
-        int sent = 0;
-        PtnMdl toSend;
-        APF_ITERATE(PtnMdl,pm,it) {
-          if( it->second == self && it->first.count(minSendPeer) ) {
-            int newowner = pickNewOwner(it->first,maxOut-1,out,pt);
-            if( newowner != -1 ) {
-              assert(newowner != -1);
-              toSend[it->first] = newowner;
-              sent++;
-            }
-          }
-        }
-        PCU_Debug_Print("minSends %d sent %d\n", minSends, sent);
-        APF_ITERATE(PtnMdl,toSend,it) {
-          printPtnMdlEnt("setting", it->first);
-          PCU_Debug_Print(" newowner %d\n", it->second);
-          pm[it->first] = it->second; //change owner
-          packRes(it->first,it->second);
-        }
-        if(sent>0)
-          break;
-      }
-      delete [] sortedSendPeers;
-    }
+    PtnMdl toSend;
+    if( out.at(self) == maxOut )
+      selectPMEtoSend(pm,send,out,maxOut, pt, toSend);
+    sendPME(toSend);
     PCU_Comm_Send();
-    //recv the owner changes
-    while (PCU_Comm_Listen()) {
-      int peer = PCU_Comm_Sender();
-      while (!PCU_Comm_Unpacked()) {
-        apf::Parts res;
-        int newowner = -1;
-        unpackRes(res,newowner);
-        printPtnMdlEnt("getting", res);
-        PCU_Debug_Print(" newowner %d from peer %d\n", newowner, peer);
-        assert(newowner != -1);
-        assert(res.size() > 1);
-        assert(pm.count(res));
-        pm[res] = newowner;
-      }
-    }
+    receivePME(pm);
+
     printPtnMdl("update",pm);
     initTasks(pm,in,out,send,recv);
     printTasks(send,"sending to");
