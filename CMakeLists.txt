@@ -6,6 +6,8 @@ if(DEFINED TRIBITS_PACKAGE)
   return()
 endif()
 
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/CMake)
+
 project(SCOREC VERSION 2.1.0 LANGUAGES CXX C)
 
 include(cmake/bob.cmake)
@@ -81,5 +83,7 @@ target_link_libraries(core INTERFACE ${SCOREC_EXPORTED_TARGETS})
 scorec_export_library(core)
 
 add_subdirectory(test)
+add_subdirectory(bbp)
+add_subdirectory(pe)
 
 bob_end_package()
