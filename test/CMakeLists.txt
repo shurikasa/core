@@ -33,6 +33,7 @@ util_exe_func(tetrahedronize tetrahedronize.cc)
 
 # Mesh conversion/formatting utilities
 util_exe_func(from_gmsh gmsh.cc)
+util_exe_func(from_gmsh_null gmsh_null.cc)
 util_exe_func(from_ansys ansys.cc)
 util_exe_func(from_neper neper.cc)
 util_exe_func(from_ugrid ugrid.cc)
