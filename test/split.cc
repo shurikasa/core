@@ -1,4 +1,5 @@
 #include <gmi_mesh.h>
+#include <gmi_null.h>
 #include <apf.h>
 #include <apfMesh2.h>
 #include <apfMDS.h>
@@ -70,6 +71,7 @@ int main(int argc, char** argv)
 {
   MPI_Init(&argc,&argv);
   PCU_Comm_Init();
+  gmi_register_null();
   gmi_register_mesh();
   getConfig(argc,argv);
   bool isOriginal = ((PCU_Comm_Self() % partitionFactor) == 0);
@@ -80,12 +82,14 @@ int main(int argc, char** argv)
   switchToOriginals();
   if (isOriginal) {
     m = apf::loadMdsMesh(g, meshFile);
+//    m = apf::loadMdsFromGmsh(g, meshFile);
     plan = getPlan(m);
   }
   switchToAll();
   m = repeatMdsMesh(m, g, plan, partitionFactor);
   Parma_PrintPtnStats(m, "");
   m->writeNative(outFile);
+  writeVtkFiles("out", m);
   freeMesh(m);
   PCU_Comm_Free();
   MPI_Finalize();

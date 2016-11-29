@@ -14,6 +14,7 @@ int main(int argc, char** argv)
   gmi_register_mesh();
   {
   apf::Mesh2* m = apf::loadMdsMesh(argv[1], argv[2]);
+  apf::printStats(m);
   apf::Field* f = apf::createLagrangeField(m, "foo", apf::VECTOR, 1);
   apf::MeshIterator* it = m->begin(0);
   apf::MeshEntity* vert;

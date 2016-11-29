@@ -146,6 +146,21 @@ static void verifyUp(Mesh* m, UpwardCounts& guc,
       ss << "exactly " << expected << '\n';
     else
       ss << "at least " << expected << '\n';
+
+    printf("The problematic model edge number is %d\n",m->getModelTag(m->toModel(e)));
+    apf::Downward de;
+    int nde = m->getDownward(e, 0, de);
+    printf("Vertices are:\n");
+    for (int i=0; i < nde; ++i){
+        Vector3 vec;
+        m->getPoint(de[i], 0, vec);
+        printf("vertex %d: ", i);
+        for (int j = 0; j < 3; ++j){
+            printf("%lf ",vec[j]);
+        }
+        printf("\n\n");
+    }
+
     std::string s = ss.str();
     fail(s.c_str());
   }

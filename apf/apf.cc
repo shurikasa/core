@@ -395,7 +395,7 @@ void accumulate(Field* f, Sharing* shr)
 void fail(const char* why)
 {
   fprintf(stderr,"APF FAILED: %s\n",why);
-  abort();
+//  abort();
 }
 
 void freeze(Field* f)

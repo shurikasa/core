@@ -84,6 +84,6 @@ scorec_export_library(core)
 
 add_subdirectory(test)
 add_subdirectory(bbp)
-add_subdirectory(pe)
+#add_subdirectory(pe)
 
 bob_end_package()
