@@ -31,6 +31,7 @@ namespace apf {
 class Field;
 class Element;
 class Mesh;
+class Mesh2;
 class MeshEntity;
 class VectorElement;
 /** \brief Mesh Elements represent the mesh coordinate vector field. */
@@ -489,7 +490,12 @@ for (t::const_iterator (i) = (w).begin(); \
   * \details Nodal fields whose shape differs from the mesh shape will
   * not be output. Fields with incomplete data will not be output.
   */
-void writeVtkFiles(const char* prefix, Mesh* m);
+void writeVtkFiles(const char* prefix, Mesh* m, int cellDim = -1);
+
+/** \brief Read a set of parallel VTK Unstructured Mesh files to an apf::Mesh
+  * with binary (base64) encoding and zlib compression (if LION_COMPRESS=ON)
+  */
+void readVtkFiles(const char* prefix, Mesh2* m);
 
 /** \brief Write a set of parallel VTK Unstructured Mesh files from an apf::Mesh
   * with binary (base64) encoding and zlib compression (if LION_COMPRESS=ON)
@@ -498,7 +504,7 @@ void writeVtkFiles(const char* prefix, Mesh* m);
   * output. Fields with incomplete data will not be output.
   */
 void writeVtkFiles(const char* prefix, Mesh* m,
-    std::vector<std::string> writeFields);
+    std::vector<std::string> writeFields, int cellDim = -1);
 
 /** \brief Output just the .vtu file with ASCII encoding for this part.
   \details this function is useful for debugging large parallel meshes.
@@ -565,7 +571,7 @@ void accumulate(Field* f, Sharing* shr = 0);
   It can be called from code that is part of the
   apf namespace, but not outside of that.
   */
-void fail(const char* why) __attribute__((noreturn));
+void fail(const char* why);
 
 /** \brief Convert a Field from Tag to array storage. */
 void freeze(Field* f);

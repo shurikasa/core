@@ -34,6 +34,7 @@ apf::Vector3 getCenter(gmi_model* gm, gmi_ent* e)
       return getEdgeCenter(gm, e);
   };
   apf::fail("ph::getCenter called on something not a vertex or edge");
+  return getEdgeCenter(gm, e);
 }
 
 apf::Plane getFacePlane(gmi_model* gm, gmi_ent* f)

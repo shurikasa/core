@@ -290,6 +290,10 @@ class Mesh
     /** \brief get first derivative at a point */
       void getFirstDerivative(ModelEntity* g, Vector3 const& p,
           Vector3& t0, Vector3& t1);
+    /** \brief checks if parametric  point is inside the model,
+     * and updates puts the location in x */
+    bool isParamPointInsideModel(ModelEntity* g,
+      Vector3 const& param, Vector3& x);
     /** \brief get the distribution of the mesh's coordinate field */
     FieldShape* getShape() const;
     /** \brief get the mesh's coordinate field */
@@ -366,7 +370,7 @@ class Mesh
 /** \brief run consistency checks on an apf::Mesh structure
   \details this can be used to implement apf::Mesh::verify.
   Other implementations may define their own. */
-void verify(Mesh* m);
+void verify(Mesh* m, bool abort_on_error=true);
 
 long verifyVolumes(Mesh* m, bool printVolumes = true);
 
@@ -447,6 +451,7 @@ struct Sharing
 /** \brief get the copies of the entity */
   virtual void getCopies(MeshEntity* e,
       CopyArray& copies) = 0;
+  virtual bool isShared(MeshEntity* e) = 0;
 };
 
 struct NormalSharing : public Sharing
@@ -455,6 +460,7 @@ struct NormalSharing : public Sharing
   virtual bool isOwned(MeshEntity* e);
   virtual void getCopies(MeshEntity* e,
       CopyArray& copies);
+  virtual bool isShared(MeshEntity* e);
 private:
   Mesh* mesh;
 };
@@ -466,6 +472,7 @@ struct MatchedSharing : public Sharing
   virtual bool isOwned(MeshEntity* e);
   virtual void getCopies(MeshEntity* e,
       CopyArray& copies);
+  virtual bool isShared(MeshEntity* e);
   Mesh* mesh;
 private:
   size_t getNeighborCount(int peer);

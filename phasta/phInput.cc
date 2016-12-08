@@ -13,6 +13,7 @@ static void setDefaults(Input& in)
   in.globalP = 0;
   in.timeStepNumber = 0;
   in.ensa_dof = 0;
+  in.ensa_melas_dof = 0; 
   in.outMeshFileName = "";
   in.adaptFlag = 0;
   in.rRead = 0;
@@ -47,16 +48,22 @@ static void setDefaults(Input& in)
   in.restartFileName = "restart";
   in.phastaIO = 1;
   in.snap = 0;
+  in.transferParametric = 1;
   in.splitAllLayerEdges = 0;
   in.filterMatches = 0;
   in.axisymmetry = 0;
   in.parmaLoops = 3; //a magical value
   in.parmaVerbosity = 1; //fairly quiet
+  in.writeGeomBCFiles = 1;
+  in.ramdisk = 0;
+  in.meshqCrtn = 0.027; 
   in.elementImbalance = 1.03;
   in.vertexImbalance = 1.05;
   in.rs = 0;
   in.formEdges = 0;
   in.writePhastaFiles = 0;
+//  in.hasDGInterface = 0;
+  in.simmetrixMesh = 0;
 }
 
 Input::Input()
@@ -73,6 +80,7 @@ static void formMaps(Input& in, StringMap& stringMap, IntMap& intMap, DblMap& db
   intMap["globalP"] = &in.globalP;
   intMap["timeStepNumber"] = &in.timeStepNumber;
   intMap["ensa_dof"] = &in.ensa_dof;
+  intMap["ensa_melas_dof"] = &in.ensa_melas_dof;
   stringMap["restartFileName"] = &in.restartFileName;
   stringMap["attributeFileName"] = &in.attributeFileName;
   stringMap["meshFileName"] = &in.meshFileName;
@@ -107,15 +115,21 @@ static void formMaps(Input& in, StringMap& stringMap, IntMap& intMap, DblMap& db
   intMap["initBubbles"] = &in.initBubbles;
   intMap["formElementGraph"] = &in.formElementGraph;
   intMap["snap"] = &in.snap;
+  intMap["transferParametric"] = &in.transferParametric;
   intMap["splitAllLayerEdges"] = &in.splitAllLayerEdges;
   intMap["filterMatches"] = &in.filterMatches;
   intMap["axisymmetry"] = &in.axisymmetry;
   intMap["parmaLoops"] = &in.parmaLoops;
   intMap["parmaVerbosity"] = &in.parmaVerbosity;
+  intMap["writeGeomBCFiles"] = &in.writeGeomBCFiles;
+  intMap["ramdisk"] = &in.ramdisk;
+  dblMap["meshqCrtn"] = &in.meshqCrtn;
   dblMap["elementImbalance"] = &in.elementImbalance;
   dblMap["vertexImbalance"] = &in.vertexImbalance;
   intMap["formEdges"] = &in.formEdges;
   intMap["writePhastaFiles"] = &in.writePhastaFiles;
+//  intMap["hasDGInterface"] = &in.hasDGInterface;
+  intMap["simmetrixMesh"] = &in.simmetrixMesh;
 }
 
 template <class T>
@@ -208,7 +222,10 @@ int countNaturalBCs(Input& in)
 
 int countEssentialBCs(Input& in)
 {
-  return in.ensa_dof + 7;
+  if(!in.ensa_melas_dof)
+    return in.ensa_dof + 7;
+  else
+    return 3+2+4+7+8; // (assuming 4 scalars to be ON) and 8 is for ec11 ec12 ec13 em1 ec21 ec22 ec23 em2
 }
 
 int countScalarBCs(Input& in)

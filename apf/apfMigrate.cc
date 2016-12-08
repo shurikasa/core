@@ -324,17 +324,6 @@ static void packReference(
   }
   else
   {
-/*  int global_id;
-  MeshTag* tag = m->findTag("global_id");
-  m->getIntTag(e, tag, &global_id);
-
-    if (global_id==9 && getDimension(m, e)==0)
-      APF_ITERATE(Copies,remotes,rit)
-      {
-        printf("(%d) e (d %d, id %d)'s remote exists on p %d\n", PCU_Comm_Self(), getDimension(m, e),global_id, rit->first); 
-      }
-    printf("(%d) packReference - getGhosts e (d %d, id %d)\n", PCU_Comm_Self(), getDimension(m, e),global_id);
-*/
     Copies ghosts;
     m->getGhosts(e,ghosts);
     found = ghosts.find(to);
@@ -517,7 +506,7 @@ static MeshEntity* unpackEntity(
   unpackTags(m,entity,tags);
   Copies remotes;
   /* temporarily store the sender as
-     a remote copy */
+     the only remote copy */
   m->addRemote(entity, from, sender);
   return entity;
 }
@@ -558,8 +547,9 @@ static void echoRemotes(
   APF_ITERATE(EntityVector,received,it)
   {
     MeshEntity* entity = *it;
-    /* the remote copies are currently temporary
-       storage for the sender */
+    /* unpackEntity() stored the identity of the
+       sender as the only remote copy so we could use
+       it here to echo copies back to their sender */
     Copies temp;
     m->getRemotes(entity,temp);
     int from = temp.begin()->first;

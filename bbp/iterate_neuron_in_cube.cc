@@ -118,6 +118,8 @@ void verifyNeuronField(apf::Mesh2*m, const char* fname, ModelEntitySet& neuron_m
        
     }
     m->end(it);
+
+    neuron_model_ents.size();
 }
 
 

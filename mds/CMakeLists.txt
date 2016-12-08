@@ -29,6 +29,7 @@ set(SOURCES
   mdsANSYS.cc
   mdsGmsh.cc
   mdsUgrid.cc
+  mdsVtk.cc
 )
 
 # Package headers

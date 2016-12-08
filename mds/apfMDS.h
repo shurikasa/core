@@ -127,6 +127,8 @@ Mesh2* loadMdsFromGmsh(gmi_model* g, const char* filename);
 
 Mesh2* loadMdsFromUgrid(gmi_model* g, const char* filename);
 
+Mesh2* loadMdsFromVtk(gmi_model* g, const char* filename);
+
 void printUgridPtnStats(gmi_model* g, const char* ugridfile, const char* ptnfile,
     const double elmWeights[]);
 

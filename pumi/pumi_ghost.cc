@@ -15,7 +15,7 @@
 #include <map>
 #include <set>
 #include <assert.h>
-#include <malloc.h>
+#include <cstdlib>
 
 #include "apf.h"
 #include "apfMDS.h"
@@ -77,7 +77,6 @@ void Ghosting::send(pMeshEnt e, int to)
   else
     m->getIntTag(e, parts_index_tag,&index);
   assert(index!=-1);
-//  std::cout<<"("<<PCU_Comm_Self()<<") send e (dim "<<d<<", id "<<pumi_ment_getGlobalID(e)<<") to "<<to<<")\n"; 
   parts_vec[d][index]->insert(to);
 }
 
@@ -104,7 +103,7 @@ void Ghosting::print()
     m->getIntTag(e, parts_index_tag, &index);
     
     APF_ITERATE(Parts,*(parts_vec[ghost_dim][index]),pit)
-      std::cout<<"("<<PCU_Comm_Self()<<") ghost e "<<pumi_ment_getGlobalID(e)<<" to "<<*pit<<"\n";
+      std::cout<<"("<<PCU_Comm_Self()<<") ghost e "<<getMdsIndex(m,e)<<" to "<<*pit<<"\n";
   }
   m->end(it);
 }
@@ -112,8 +111,6 @@ void Ghosting::print()
 Parts& Ghosting::sending(pMeshEnt e, int d)
 {
   int index;
-  if(!m->hasTag(e, parts_index_tag))
-    std::cout<<"("<<PCU_Comm_Self()<<") ERROR: ghost e (dim "<<d<<") "<<pumi_ment_getGlobalID(e)<<" has no parts_index_tag\n";
   assert(m->hasTag(e, parts_index_tag));
   m->getIntTag(e, parts_index_tag, &index);
   return *(parts_vec[d][index]);
@@ -134,7 +131,7 @@ int Ghosting::count()
 
 #include <assert.h>
 // *********************************************************
-static pMeshEnt unpackGhost(Ghosting* plan, pMeshTag, apf::DynamicArray<pMeshTag>& tags)
+static pMeshEnt unpackGhost(Ghosting* plan, apf::DynamicArray<pMeshTag>& tags)
 // *********************************************************
 {
   int from = PCU_Comm_Sender();
@@ -158,28 +155,23 @@ static pMeshEnt unpackGhost(Ghosting* plan, pMeshTag, apf::DynamicArray<pMeshTag
   plan->getMesh()->addGhost(entity, from, sender);
   pumi::instance()->ghost_vec[apf::getDimension(plan->getMesh(), entity)].push_back(entity);
   plan->getMesh()->setIntTag(entity,pumi::instance()->ghost_tag,&from);
-//  if (!pumi_rank()) 
-//    std::cout<<"("<<pumi_rank()<<") "<<__func__<<": creating ghost (d "<<getDimension(plan->getMesh(), entity)
-//             <<", id "<<pumi_ment_getGlobalID(entity)<<")->addGhost("<<from<<", "<<sender<<")\n";
   return entity;
 }
 
 // *********************************************************
-static void ghost_receiveEntities(Ghosting* plan, pMeshTag global_id_tag, apf::DynamicArray<pMeshTag>& tags,
+static void ghost_receiveEntities(Ghosting* plan, apf::DynamicArray<pMeshTag>& tags,
     EntityVector& received)
 // *********************************************************
 {
   received.reserve(1024);
   while (PCU_Comm_Receive())
-    received.push_back(unpackGhost(plan,global_id_tag, tags));
+    received.push_back(unpackGhost(plan,tags));
 }
 
 // *********************************************************
 static void setupGhosts(pMesh m, EntityVector& received)
 // *********************************************************
 {
-//  std::cout<<"("<<pumi_rank()<<") START "<<__func__<<"\n";
-
   PCU_Comm_Begin();
   APF_ITERATE(EntityVector,received,it)
   {
@@ -187,24 +179,16 @@ static void setupGhosts(pMesh m, EntityVector& received)
     /* the remote copies are currently temporary
        storage for the sender */
     apf::Copies temp;
-/*
-    int global_id;
-    pMeshTag tag = m->findTag("global_id");
-    m->getIntTag(entity, tag, &global_id);
-    printf("(%d)  setupGhosts - getGhosts e (d %d, id %d)\n", PCU_Comm_Self(), getDimension(m, entity),global_id);
-*/
     m->getGhosts(entity,temp);
     int to = temp.begin()->first;
     PCU_COMM_PACK(to,temp.begin()->second); // sender
     PCU_COMM_PACK(to,entity);
-//    std::cout<<"("<<pumi_rank()<<") "<<__func__<<": echo dim "<<apf::getDimension(m, entity)<<" id "<<pumi_ment_getGlobalID(entity)<<" to "<<to<<", entity="<<entity<<", Rx="<<temp.begin()->second<<"\n";
     apf::Copies remotes;
     m->getRemotes(entity, remotes);
     APF_ITERATE(Copies,remotes,rit)
     {
       PCU_COMM_PACK(rit->first, rit->second); // sender
       PCU_COMM_PACK(rit->first,entity);
-//    std::cout<<"("<<pumi_rank()<<") "<<__func__<<": echo dim "<<apf::getDimension(m, entity)<<" id "<<pumi_ment_getGlobalID(entity)<<" to "<<rit->first<<", entity="<<entity<<", Rx="<<rit->second<<"\n";
     }
   }
   PCU_Comm_Send();
@@ -215,17 +199,12 @@ static void setupGhosts(pMesh m, EntityVector& received)
     PCU_COMM_UNPACK(entity);
     pMeshEnt sender;
     PCU_COMM_UNPACK(sender);
-//    std::cout<<"("<<pumi_rank()<<") "<<__func__<<": received entity="<<entity<<", sender="<<sender<<"\n";
     m->addGhost(entity, from, sender);
     if (!m->hasTag(entity, pumi::instance()->ghosted_tag))
     {
       pumi::instance()->ghosted_vec[apf::getDimension(m, entity)].push_back(entity);
       m->setIntTag(entity,pumi::instance()->ghosted_tag,&from);
-//      std::cout<<"("<<pumi_rank()<<") "<<__func__<<": set ghosted_tag to e (d "<<apf::getDimension(m, entity)<<", id "<<pumi_ment_getGlobalID(entity)<<")\n";
     }
-//    if (!getDimension(m,entity)) 
-//    std::cout<<"("<<pumi_rank()<<") "<<__func__<<": "<<entity<<" (d "<<getDimension(m,entity)
-//             <<", id "<<pumi_ment_getGlobalID(entity)<<")->addGhost("<<from<<", "<<sender<<")\n";
   }
 }
 
@@ -261,7 +240,6 @@ static void ghost_collectEntities (pMesh m, Ghosting* plan, EntityVector entitie
   APF_ITERATE(EntityVector,entitiesToGhost[ghost_dim],it)
   {
     ghost_ent=*it;    
-//    std::cout<<"("<<pumi_rank()<<") "<<__func__<<": -- ghost_ent "<<pumi_ment_getGlobalID(ghost_ent)<<"\n";
     DownEnts.clear();
     pumi_ment_getAdj(ghost_ent, -1, DownEnts);
   
@@ -273,7 +251,6 @@ static void ghost_collectEntities (pMesh m, Ghosting* plan, EntityVector entitie
       {
         m->setIntTag(down_ent,tag,&dummy);
         entitiesToGhost[down_ent_dim].push_back(down_ent);
-//        std::cout<<"("<<pumi_rank()<<") "<<__func__<<": entitiesToGhost["<<down_ent_dim<<"].push_back("<<pumi_ment_getGlobalID(down_ent)<<")\n";
       }
       APF_ITERATE(Parts, plan->sending(ghost_ent, ghost_dim), pit)
         plan->send(down_ent, *pit);
@@ -329,7 +306,6 @@ static void ghost_collectEntities (pMesh m, Ghosting* plan, EntityVector entitie
       {
         m->setIntTag(r,tag,&dummy);
         entitiesToGhost[dim].push_back(r);
-//        std::cout<<"("<<pumi_rank()<<") "<<__func__<<": rmt entitiesToGhost["<<dim<<"].push_back("<<pumi_ment_getGlobalID(r)<<")\n";
       }
 
       pids = (int*)((char*)msg_recv+sizeof(pMeshEnt)); 
@@ -390,18 +366,9 @@ void ghost_sendEntities(Ghosting* plan, int entDim,
         res_parts.insert(rit->first);
     }
 
-//    std::cout<<"("<<pumi_rank()<<") "<<__func__<<": processing "<<ent<<" (d "<<entDim
-//           <<", id "<<pumi_ment_getGlobalID(ent)<<") m->isGhosted(ent)="<<m->isGhosted(ent)<<"\n";
-
     if (m->isGhosted(ent))
     {
       apf::Copies ghosts;
-/*
-    int global_id;
-    pMeshTag tag = m->findTag("global_id");
-    m->getIntTag(ent, tag, &global_id);
-    printf("(%d)  ghost_sendEntities - getGhosts e (d %d, id %d)\n", PCU_Comm_Self(), getDimension(m, ent),global_id);
-*/
       m->getGhosts(ent,ghosts);
       APF_ITERATE(apf::Copies,ghosts,rit)
         res_parts.insert(rit->first);
@@ -416,12 +383,9 @@ void ghost_sendEntities(Ghosting* plan, int entDim,
     for (std::set<int>::iterator piter=temp.begin(); piter!=temp.end();++piter)
     {
       if (*piter==src_partid) continue;
-//      std::cout<<"("<<pumi_rank()<<") "<<__func__<<": send entity "<<ent<<" (d "<<entDim
-//           <<", id "<<pumi_ment_getGlobalID(ent)<<") to "<<*piter<<"\n";
       apf::packEntity(plan->getMesh(),*piter,ent,tags, true/*ghosting*/);  
     }
   }
-//  std::cout<<"("<<pumi_rank()<<") END "<<__func__<<": d "<<entDim<"\n";
 }
 
 
@@ -438,14 +402,13 @@ void pumi_ghost_create(pMesh m, Ghosting* plan)
 
   apf::DynamicArray<pMeshTag> tags;
   plan->getMesh()->getTags(tags);
-  pMeshTag global_id_tag=plan->getMesh()->findTag("global_id");
   for (int dimension = 0; dimension <= plan->ghost_dim; ++dimension)
   {
     PCU_Comm_Begin();
     ghost_sendEntities(plan, dimension, entities_to_ghost[dimension], tags);
     PCU_Comm_Send();
     EntityVector received;
-    ghost_receiveEntities(plan,global_id_tag,tags,received);
+    ghost_receiveEntities(plan,tags,received);
     setupGhosts(plan->getMesh(),received);
   }
   
@@ -456,6 +419,268 @@ void pumi_ghost_create(pMesh m, Ghosting* plan)
 }
 
 // *********************************************************
+void do_off_part_bridge(pMesh m, int brg_dim, int ghost_dim, int num_layer, 
+                        std::set<pMeshEnt>** off_bridge_set, Ghosting* plan)
+// *********************************************************
+{
+  std::map<pMeshEnt, set<int> > off_bridge_marker;
+  pMeshEnt ghost_ent;
+  pMeshEnt brg_ent;
+  void* msg_send;
+  pMeshEnt* s_ent;
+  size_t msg_size;
+  int dummy=1;
+  PCU_Comm_Begin();
+
+  for (int layer=2; layer<num_layer+1; ++layer)
+  {
+    for (int pid=0; pid<pumi_size(); ++pid)
+    {
+      for (std::set<pMeshEnt>::iterator off_it=off_bridge_set[layer][pid].begin(); 
+            off_it!=off_bridge_set[layer][pid].end(); ++off_it)
+      {
+        brg_ent = *off_it;
+        apf::Copies brg_remotes;
+        m->getRemotes(brg_ent,brg_remotes);
+        APF_ITERATE(apf::Copies,brg_remotes,brg_rit)
+        {
+          if (brg_rit->first==pid) continue;
+          msg_size=sizeof(pMeshEnt) +2*sizeof(int);
+          msg_send = malloc(msg_size);
+          s_ent = (pMeshEnt*)msg_send; 
+          *s_ent = brg_rit->second; 
+          int *s_int = (int*)((char*)msg_send + sizeof(pMeshEnt));
+          s_int[0]=layer;
+          s_int[1]=pid;
+          PCU_Comm_Write(brg_rit->first, (void*)msg_send, msg_size);
+          free(msg_send);    
+        }  // APF_ITERATE
+      } // for (std::map<pMeshEnt, set<int> >::iterator iter     
+    }
+  }
+  // clean up
+  for (int i=0; i<num_layer+1;++i)
+    for (int j=0; j<pumi_size();++j)
+      off_bridge_set[i][j].clear();
+
+  PCU_Comm_Send();
+  // receive phase
+  void *msg_recv;
+  int pid_from;
+  int* r_int;
+  pMeshEnt r;
+  int r_layer, r_pid;
+  pMeshTag tag = m->findTag("ghost_check_mark");
+  std::vector<pMeshEnt> processed_ent;
+  std::vector<pMeshEnt> adj_ent;
+
+  while(PCU_Comm_Read(&pid_from, &msg_recv, &msg_size))
+  {
+    processed_ent.clear();
+
+    r = *((pMeshEnt*)msg_recv); 
+    r_int = (int*)((char*)msg_recv+sizeof(pMeshEnt)); 
+    r_layer=r_int[0];
+    r_pid=r_int[1];
+    off_bridge_marker[r].insert(r_pid);
+    apf::Adjacent ghost_cands;
+    m->getAdjacent(r,ghost_dim, ghost_cands);   
+    APF_ITERATE(apf::Adjacent, ghost_cands, adj_ent_it)
+    {
+      ghost_ent = *adj_ent_it;
+      if (m->isGhost(ghost_ent)) continue; // skip ghost copy
+      plan->send(ghost_ent, r_pid);
+
+      m->setIntTag(ghost_ent,tag,&dummy);
+      processed_ent.push_back(ghost_ent);
+    
+      if (r_layer<num_layer)
+      {
+        apf::Downward adjacent;
+        int num_brg=m->getDownward(ghost_ent,brg_dim, adjacent);
+        for (int b=0; b<num_brg; ++b)
+        {     
+          if (m->isShared(adjacent[b]) && adjacent[b]!=r && !pumi_ment_isOn(adjacent[b], r_pid))
+            off_bridge_set[r_layer+1][r_pid].insert(adjacent[b]);
+        }
+      } // if (r_layer<num_layer)
+    } // APF_ITERATE
+
+    int start_prev_layer=0, size_prev_layer=processed_ent.size(), num_prev_layer;
+    for (int layer=r_layer+1; layer<num_layer+1; ++layer)
+    {  
+      num_prev_layer=0;
+      for (int i=start_prev_layer; i<size_prev_layer; ++i)
+      {
+        ghost_ent = processed_ent.at(i);
+        adj_ent.clear();
+        pumi_ment_get2ndAdj (ghost_ent, brg_dim, ghost_dim, adj_ent);
+
+        for (std::vector<pMeshEnt>::iterator git=adj_ent.begin(); git!=adj_ent.end(); ++git)
+        {
+          if (m->isGhost(*git) || m->hasTag(*git,tag))
+            continue; // skip ghost copy or already-processed copy
+      
+          plan->send(*git, r_pid);
+
+          m->setIntTag(*git,tag,&dummy);
+          processed_ent.push_back(*git);
+          ++num_prev_layer;
+        } // for (std::vector<pMeshEnt>::iterator git=adj_ent.begin()
+
+        // collect off-part adjacent bridges
+        if (layer<num_layer)
+        {
+          apf::Downward adjacent;
+          int num_brg=m->getDownward(ghost_ent,brg_dim, adjacent);
+          for (int b=0; b<num_brg; ++b)
+          {     
+            if (m->isShared(adjacent[b]) && adjacent[b]!=r && !pumi_ment_isOn(adjacent[b], r_pid))
+              off_bridge_set[layer+1][r_pid].insert(adjacent[b]);
+          } // for int b=0
+        } // if (layer<=num_layer)
+      } // for int i=start_prev_layer
+      start_prev_layer+=size_prev_layer;
+      size_prev_layer+=num_prev_layer;
+    } // for layer
+    for (std::vector<pMeshEnt>::iterator git=processed_ent.begin(); git!=processed_ent.end(); ++git)
+      m->removeTag(*git,tag);
+  } // while r
+
+  if (num_layer==2) return;
+
+  // the below runs only if num_layer>2
+  int global_num_off_part, local_num_off_part=0;
+  for (int i=0; i<num_layer+1;++i)
+    for (int j=0; j<pumi_size();++j)
+      local_num_off_part+=off_bridge_set[i][j].size();
+  MPI_Allreduce(&local_num_off_part, &global_num_off_part, 1,MPI_INT,MPI_SUM,MPI_COMM_WORLD);
+
+  while (global_num_off_part)
+  {
+    PCU_Comm_Begin();
+
+    for (int layer=0; layer<num_layer+1; ++layer)
+    {
+      for (int pid=0; pid<pumi_size(); ++pid)
+      {
+        for (std::set<pMeshEnt>::iterator off_it=off_bridge_set[layer][pid].begin(); 
+            off_it!=off_bridge_set[layer][pid].end(); ++off_it)
+        {
+          brg_ent = *off_it;
+          apf::Copies brg_remotes;
+          m->getRemotes(brg_ent,brg_remotes);
+          APF_ITERATE(apf::Copies,brg_remotes,brg_rit)
+          {
+            if (brg_rit->first==pid) continue;
+            msg_size=sizeof(pMeshEnt) +2*sizeof(int);
+            msg_send = malloc(msg_size);
+            s_ent = (pMeshEnt*)msg_send; 
+            *s_ent = brg_rit->second; 
+            int *p_int = (int*)((char*)msg_send + sizeof(pMeshEnt));
+            p_int[0]=layer;
+            p_int[1]=pid;
+            PCU_Comm_Write(brg_rit->first, (void*)msg_send, msg_size);
+            free(msg_send);    
+          }  // APF_ITERATE
+        } // for off_it     
+      }
+    }
+    // clean up
+    for (int i=0; i<num_layer+1;++i)
+      for (int j=0; j<pumi_size();++j)
+        off_bridge_set[i][j].clear();
+
+    PCU_Comm_Send();
+
+    while (PCU_Comm_Read(&pid_from, &msg_recv, &msg_size))
+    {
+      processed_ent.clear();
+
+      r = *((pMeshEnt*)msg_recv); 
+      r_int = (int*)((char*)msg_recv+sizeof(pMeshEnt)); 
+
+      r_layer=r_int[0];
+      r_pid=r_int[1];
+      assert(r_layer<=num_layer && r_pid<pumi_size());
+      off_bridge_marker[r].insert(r_pid);
+
+      apf::Adjacent ghost_cands;
+      m->getAdjacent(r,ghost_dim, ghost_cands);   
+      APF_ITERATE(apf::Adjacent, ghost_cands, adj_ent_it)
+      {
+        ghost_ent = *adj_ent_it;
+        if (m->isGhost(ghost_ent)) continue; // skip ghost copy
+        plan->send(ghost_ent, r_pid);
+
+        m->setIntTag(ghost_ent,tag,&dummy);
+        processed_ent.push_back(ghost_ent);
+
+        if (r_layer<num_layer)
+        {
+          apf::Downward adjacent;
+          int num_brg=m->getDownward(ghost_ent,brg_dim, adjacent);
+          for (int b=0; b<num_brg; ++b)
+          {     
+            if (m->isShared(adjacent[b]) && adjacent[b]!=r && !pumi_ment_isOn(adjacent[b], r_pid))
+            {
+              if (off_bridge_marker[adjacent[b]].find(r_pid)==off_bridge_marker[adjacent[b]].end())
+                off_bridge_set[r_layer+1][r_pid].insert(adjacent[b]);
+            }
+          }
+        } // if (layer+1<=num_layer)
+      } // APF_ITERATE
+
+      int start_prev_layer=0, size_prev_layer=processed_ent.size(), num_prev_layer;
+      for (int layer=r_layer+1; layer<num_layer+1; ++layer)
+      {  
+        num_prev_layer=0;
+        for (int i=start_prev_layer; i<size_prev_layer; ++i)
+        {
+          ghost_ent = processed_ent.at(i);
+          adj_ent.clear();
+          pumi_ment_get2ndAdj (ghost_ent, brg_dim, ghost_dim, adj_ent);
+  
+          for (std::vector<pMeshEnt>::iterator git=adj_ent.begin(); git!=adj_ent.end(); ++git)
+          {
+            if (m->isGhost(*git) || m->hasTag(*git,tag))
+              continue; // skip ghost copy or already-processed copy
+      
+            plan->send(*git, r_pid);
+ 
+            m->setIntTag(*git,tag,&dummy);
+            processed_ent.push_back(*git);
+            ++num_prev_layer;
+          } // for (std::vector<pMeshEnt>::iterator git=adj_ent.begin()
+
+          // collect off-part adjacent bridges
+          if (layer<num_layer)
+          {
+            apf::Downward adjacent;
+            int num_brg=m->getDownward(ghost_ent,brg_dim, adjacent);
+            for (int b=0; b<num_brg; ++b)
+            {     
+              if (m->isShared(adjacent[b]) && adjacent[b]!=r && !pumi_ment_isOn(adjacent[b], r_pid))
+                off_bridge_set[layer+1][r_pid].insert(adjacent[b]);
+            } // for int b=0
+          } // if (layer<=num_layer)
+        } // for int i=start_prev_layer
+        start_prev_layer+=size_prev_layer;
+        size_prev_layer+=num_prev_layer;
+      } // for layer
+      for (std::vector<pMeshEnt>::iterator git=processed_ent.begin(); git!=processed_ent.end(); ++git)
+        m->removeTag(*git,tag);
+    }  // while (PCU_Comm_Read)
+    local_num_off_part=0;
+    for (int i=0; i<num_layer+1;++i)
+      for (int j=0; j<pumi_size();++j)
+        local_num_off_part+=off_bridge_set[i][j].size();
+    MPI_Allreduce(&local_num_off_part, &global_num_off_part, 1,MPI_INT,MPI_SUM,MPI_COMM_WORLD);
+  } // while global_off_part_brg
+}
+
+
+// *********************************************************
 void pumi_ghost_createLayer (pMesh m, int brg_dim, int ghost_dim, int num_layer, int include_copy)
 // *********************************************************
 {
@@ -463,7 +688,7 @@ void pumi_ghost_createLayer (pMesh m, int brg_dim, int ghost_dim, int num_layer,
   
   int dummy=1, mesh_dim=m->getDimension(), self = pumi_rank();;
   
-// brid/ghost dim check
+  // brid/ghost dim check
   if (brg_dim>=ghost_dim || 0>brg_dim || brg_dim>=mesh_dim || 
       ghost_dim>mesh_dim || ghost_dim<1)
   {
@@ -472,7 +697,6 @@ void pumi_ghost_createLayer (pMesh m, int brg_dim, int ghost_dim, int num_layer,
     return;
   }
 
-//  std::cout<<"\n("<<pumi_rank()<<") START "<<__func__<<" (bd "<<brg_dim<<", gd "<<mesh_dim<<", nl "<<num_layer<<", ic"<<include_copy<<")\n";
   double t0 = PCU_Time();
 
   pMeshTag tag = m->createIntTag("ghost_check_mark",1);
@@ -487,18 +711,16 @@ void pumi_ghost_createLayer (pMesh m, int brg_dim, int ghost_dim, int num_layer,
 
   std::vector<pMeshEnt> processed_ent;
   std::vector<pMeshEnt> adj_ent;
-  //PUMI_PartEntIter_InitPartBdry(part, PUMI_ALL, brg_dim, PUMI_ALLTOPO, pbdry_iter);
-  //while (PUMI_PartEntIter_GetNext(pbdry_iter, brg_ent)==PUMI_SUCCESS)
+
+  std::set<pMeshEnt>** off_bridge_set=new std::set<pMeshEnt>*[num_layer+1];
+  for (int i=0; i<num_layer+1;++i)
+    off_bridge_set[i]=new std::set<pMeshEnt>[pumi_size()];
 
   apf::MeshIterator* it = m->begin(brg_dim);
-//  std::cout<<"("<<pumi_rank()<<") "<<__func__<<": "<<__LINE__<<"\n";
-
   while ((brg_ent = m->iterate(it)))
   {
     if (!m->isShared(brg_ent)) continue; // skip non-partboundary entity
     if (!include_copy && m->getOwner(brg_ent)!=self) continue;
-
-//    std::cout<<"("<<pumi_rank()<<") "<<__func__<<": "<<__LINE__<<" brg_ent "<<pumi_ment_getGlobalID(brg_ent)<<"\n";
     processed_ent.clear();
 
     apf::Copies remotes;
@@ -517,28 +739,22 @@ void pumi_ghost_createLayer (pMesh m, int brg_dim, int ghost_dim, int num_layer,
       m->setIntTag(ghost_ent,tag,&dummy);
       processed_ent.push_back(ghost_ent);
     }
-    
-    //for (std::vector<pMeshEnt>::iterator ghost_it=brg_ghost_map[ent]->begin();ghost_it!=brg_ghost_map[ent]->end(); ++ghost_it)
-//    std::cout<<"[p"<<PUMI_CommRank()<<"] "<<PUMI_MeshEnt_StrID(brg_ent)<<"- 1-layer ghost "<<processed_ent.size()<<"\n";
+
     int start_prev_layer=0, size_prev_layer=processed_ent.size(), num_prev_layer;
-//    std::cout<<"("<<pumi_rank()<<") "<<__func__<<": processed_ent.size()="<<processed_ent.size()<<"\n";
     for (int layer=2; layer<num_layer+1; ++layer)
     {  
       num_prev_layer=0;
       for (int i=start_prev_layer; i<size_prev_layer; ++i)
       {
         ghost_ent = processed_ent.at(i);
-//        std::cout<<"("<<pumi_rank()<<") "<<__func__<<": brg_ent "<<pumi_ment_getGlobalID(brg_ent)<<", processing "<<i<<" ghost_ent "<<pumi_ment_getGlobalID(ghost_ent)<<"\n";
         adj_ent.clear();
         pumi_ment_get2ndAdj (ghost_ent, brg_dim, ghost_dim, adj_ent);
-        //std::cout<<"("<<pumi_rank()<<") "<<__func__<<": pumi_ment_get2ndAdj.size()="<<adj_ent.size()<<"\n";
 
         for (std::vector<pMeshEnt>::iterator git=adj_ent.begin(); git!=adj_ent.end(); ++git)
         {
           if (m->isGhost(*git) || m->hasTag(*git,tag))
             continue; // skip ghost copy or already-processed copy
       
-          //copy_RC_to_BP(brg_ent, ghost_ent);
           APF_ITERATE(apf::Copies,remotes,rit)
             plan->send(*git, rit->first);
 
@@ -546,27 +762,66 @@ void pumi_ghost_createLayer (pMesh m, int brg_dim, int ghost_dim, int num_layer,
           processed_ent.push_back(*git);
           ++num_prev_layer;
         } // for (std::vector<pMeshEnt>::iterator git=adj_ent.begin()
+
+        // collect off-part adjacent bridges
+        if (layer<=num_layer)
+        {
+          apf::Downward adjacent;
+          int num_brg=m->getDownward(ghost_ent,brg_dim, adjacent);
+          for (int b=0; b<num_brg; ++b)
+          {     
+            if (m->isShared(adjacent[b]) && brg_ent!=adjacent[b])
+            {
+              APF_ITERATE(apf::Copies,remotes,rit)
+              {
+                if (!pumi_ment_isOn(adjacent[b], rit->first))
+                  off_bridge_set[layer][rit->first].insert(adjacent[b]);
+              }
+            } // if (m->isShared(adjacent[b])
+          } // for int b=0
+        } // if (layer<=num_layer)
       } // for int i=start_prev_layer
+
       start_prev_layer+=size_prev_layer;
       size_prev_layer+=num_prev_layer;
     } // for layer
     for (std::vector<pMeshEnt>::iterator git=processed_ent.begin(); git!=processed_ent.end(); ++git)
       m->removeTag(*git,tag);
-//    std::cout<<"("<<pumi_rank()<<") "<<__func__<<": "<<__LINE__<<" brg_ent "<<pumi_ment_getGlobalID(brg_ent)<<"\n";
   } // while brg_ent
   m->end(it);
-  m->destroyTag(tag);
 
 // ********************************************
-// STEP 2: perform ghosting
+// STEP 2: deal with off-part adjacency, if any
 // ********************************************
-//  std::cout<<"("<<pumi_rank()<<") "<<__func__<<": plan->count()="<<plan->count()<<"\n";
+  int global_num_off_part=0, local_num_off_part=0;
+  if (num_layer>=2)
+  {
+    for (int i=0; i<num_layer+1;++i)
+      for (int j=0; j<pumi_size();++j)
+        local_num_off_part+=off_bridge_set[i][j].size();
+    MPI_Allreduce(&local_num_off_part, &global_num_off_part, 1,MPI_INT,MPI_SUM,MPI_COMM_WORLD);
+  }
+
+  if (global_num_off_part)
+    do_off_part_bridge(m, brg_dim, ghost_dim, num_layer, off_bridge_set, plan);
+
+  // clean up
+  m->destroyTag(tag);
+  for (int i=0; i<num_layer+1;++i)
+    for (int j=0; j<pumi_size();++j)
+      off_bridge_set[i][j].clear();
+
+  for (int i=0; i<num_layer+1;++i)
+    delete [] off_bridge_set[i];
+  delete [] off_bridge_set;
+
+// ********************************************
+// STEP 3: perform ghosting
+// ********************************************
   if (!PCU_Comm_Self())
     printf("ghosting plan computed in %f seconds\n", PCU_Time()-t0);
 
   pumi_ghost_create(m, plan);
-
-
 }
 
 // *********************************************************

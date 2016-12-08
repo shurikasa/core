@@ -70,6 +70,7 @@ Matrix3x3 getJacobianInverse(Matrix3x3 J, int dim)
     default:
       fail("getJacobianInverse: bad dimension");
   }
+  return invert(J);
 }
 
 void Element::getGlobalGradients(Vector3 const& local,

@@ -12,11 +12,13 @@ namespace {
   inline double getTime() {
     return MPI_Wtime();
   }
+#if PHSTREAM_TIMERS_ON==1
   inline bool isRankZero() {
     int rank = 0;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     return !rank;
   }
+#endif
   inline void printTime(const char* key, double t) {
     (void) key;
     (void) t;
@@ -50,19 +52,31 @@ RStream* makeRStream() {
   return rs;
 }
 
+#ifdef __APPLE__
+FILE* openRStreamRead(RStream*) {
+  return NULL;
+}
+#else
 FILE* openRStreamRead(RStream* rs) {
   const double t0 = getTime();
   FILE* f = fmemopen(rs->restart, rs->rSz, "r");
   printTime(__func__, getTime()-t0);
   return f;
 }
+#endif
 
+#ifdef __APPLE__
+FILE* openRStreamWrite(RStream*) {
+  return NULL;
+}
+#else
 FILE* openRStreamWrite(RStream* rs) {
   const double t0 = getTime();
   FILE* f = open_memstream(&(rs->restart), &(rs->rSz));
   printTime(__func__, getTime()-t0);
   return f;
 }
+#endif
 
 void clearRStream(RStream* rs) {
   const double t0 = getTime();
@@ -119,6 +133,11 @@ void writeUnknown(const char* fname) {
       __func__, fname);
 }
 
+#ifdef __APPLE__
+FILE* openGRStreamRead(GRStream*, const char*) {
+  return NULL;
+}
+#else
 FILE* openGRStreamRead(GRStream* grs, const char* named) {
   const double t0 = getTime();
   bool isR, isG;
@@ -135,7 +154,13 @@ FILE* openGRStreamRead(GRStream* grs, const char* named) {
   printTime(__func__, getTime()-t0);
   return f;
 }
+#endif
 
+#ifdef __APPLE__
+FILE* openGRStreamWrite(GRStream*, const char*) {
+  return NULL;
+}
+#else
 FILE* openGRStreamWrite(GRStream* grs, const char* named) {
   const double t0 = getTime();
   bool isR, isG;
@@ -152,6 +177,7 @@ FILE* openGRStreamWrite(GRStream* grs, const char* named) {
   printTime(__func__, getTime()-t0);
   return f;
 }
+#endif
 
 void clearGRStream(GRStream* grs) {
   const double t0 = getTime();

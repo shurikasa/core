@@ -24,6 +24,7 @@ double getVolumeChange(int dim, double h) {
   if (dim == 2) return 1. / (h * h);
   if (dim == 3) return 1. / (h * h * h);
   apf::fail("bad dim");
+  return 0;
 }
 
 class TotalMetricVolumeIso : public apf::Integrator {
@@ -68,6 +69,7 @@ double getPerfectVolume(int dim) {
   if (dim == 2) return sqrt(3.) / 4.;
   if (dim == 3) return sqrt(2.) / 12.;
   apf::fail("bad dim");
+  return 0;
 }
 
 double getVolumeScalar(int dim, double targetElementCount,
@@ -79,6 +81,7 @@ double getLengthScalar(int dim, double volumeScalar) {
   if (dim == 2) return 1. / sqrt(volumeScalar);
   if (dim == 3) return 1. / pow(volumeScalar, 1. / 3.);
   apf::fail("bad dim");
+  return 0;
 }
 
 double getLengthScalar(int dim, double targetElementCount,

@@ -28,32 +28,61 @@ gModel::~gModel()
   delete g;
 }
 
-pGeom pumi_geom_load(const char* filename, const char* model_type)
+gEntity* gModel::getGeomEnt(gmi_ent* ge)
 {
-  assert(!strcmp(model_type,"null") || !strcmp(model_type,"mesh") || !strcmp(model_type,"analytic"));
+  return allEntities.getGeomEnt(gmi_dim(g, ge), ge);
+}
+
+void geom_freeze(pGeom g)
+{
+  pumi_geom_freezeAnalytic(g);
+}
+
+pGeom pumi_geom_load(const char* filename, const char* model_type, void (*geom_load_fp)(const char*))
+{
   if (!strcmp(model_type,"null"))
   {
     gmi_register_null();
     pumi::instance()->model = new gModel(gmi_load(".null"));
+    geom_freeze(pumi::instance()->model);
+  }
+  else if (!strcmp(model_type,"mesh"))
+  {
+    gmi_register_mesh();
+    pumi::instance()->model = new gModel(gmi_load(filename));
+    geom_freeze(pumi::instance()->model);
+  }
+  else if (!strcmp(model_type,"analytic")) 
+  {
+    pumi::instance()->model = new gModel(gmi_make_analytic());
+    if (geom_load_fp)
+    {
+      geom_load_fp(filename);
+      geom_freeze(pumi::instance()->model);
+    }
   }
   else
   {
-    if (!strcmp(model_type,"mesh"))
-      gmi_register_mesh();
-    pumi::instance()->model = new gModel(gmi_load(filename));
+    if (!pumi_rank()) std::cerr<<"[PUMI ERROR] unsupported model type "<<model_type<<"\n";
+    return NULL;
   }
-  
-  // loop over entities and fill the container
-  for (int i=0; i<=3; ++i)
-  {
-    gmi_iter* giter = gmi_begin(pumi::instance()->model->getGmi(), i);
-    while(gmi_ent* gent = gmi_next(pumi::instance()->model->getGmi(), giter))
-      pumi::instance()->model->add(i, new gEntity(gent));
-    gmi_end(pumi::instance()->model->getGmi(), giter);
-  }
+
   return pumi::instance()->model;
 }
 
+void pumi_geom_freezeAnalytic(pGeom g)
+{
+  // loop over entities and fill the container
+  for (int i=0; i<=3; ++i)
+  {
+    if (g->getGmi()->n[i]==g->size(i)) continue;
+    assert(g->size(i)==0);
+    gmi_iter* giter = gmi_begin(g->getGmi(), i);
+    while(gmi_ent* gent = gmi_next(g->getGmi(), giter))
+      g->add(i, new gEntity(gent));
+    gmi_end(g->getGmi(), giter);
+  }
+}
 int pumi_geom_getNumEnt(pGeom g, int d)
 {
   return g->getGmi()->n[d];

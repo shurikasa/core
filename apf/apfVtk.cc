@@ -13,6 +13,8 @@
 #include "apfNumberingClass.h"
 #include "apfShape.h"
 #include "apfFieldData.h"
+#include "apfConvert.h"
+#include "../mds/apfMDS.h"
 #include <sstream>
 #include <fstream>
 #include <cassert>
@@ -50,21 +52,22 @@ class HasAll : public FieldOp
     FieldBase* f;
 };
 
-static bool isPrintable(
+static bool shouldPrint(
     FieldBase* f,
     std::vector<std::string> writeFields)
 {
-  bool inWriteFields = false;
+  bool print = false;
   std::string fieldName = f->getName();
-  for (unsigned int i = 0; i < writeFields.size(); i++)
-  {
+  for (size_t i=0; i < writeFields.size(); ++i)
     if (fieldName == writeFields[i])
-    {
-      inWriteFields = true;
-    }
-  }
+      print = true;
+  return print;
+}
+
+static bool isPrintable(FieldBase* f)
+{
   HasAll op;
-  return inWriteFields && op.run(f);
+  return PCU_And(op.run(f));
 }
 
 static bool isNodal(FieldBase* f)
@@ -72,15 +75,13 @@ static bool isNodal(FieldBase* f)
   return f->getShape() == f->getMesh()->getShape();
 }
 
-static bool isIP(FieldBase* f)
+static bool isIP(FieldBase* f, int cellDim)
 {
   FieldShape* s = f->getShape();
-  Mesh* m = f->getMesh();
-  int d = m->getDimension();
-  for (int i=0; i < d; ++i)
+  for (int i=0; i < cellDim; ++i)
     if (s->hasNodesIn(i))
       return false;
-  return s->hasNodesIn(d);
+  return s->hasNodesIn(cellDim);
 }
 
 static void describeArray(
@@ -149,7 +150,7 @@ static void writePPointData(std::ostream& file,
   for (int i=0; i < m->countFields(); ++i)
   {
     Field* f = m->getField(i);
-    if (isNodal(f) && isPrintable(f,writeFields))
+    if (isNodal(f) && shouldPrint(f,writeFields))
     {
       writePDataArray(file,f,isWritingBinary);
     }
@@ -157,7 +158,7 @@ static void writePPointData(std::ostream& file,
   for (int i=0; i < m->countNumberings(); ++i)
   {
     Numbering* n = m->getNumbering(i);
-    if (isNodal(n) && isPrintable(n,writeFields))
+    if (isNodal(n) && shouldPrint(n,writeFields))
     {
       writePDataArray(file,n,isWritingBinary);
     }
@@ -165,7 +166,7 @@ static void writePPointData(std::ostream& file,
   for (int i=0; i < m->countGlobalNumberings(); ++i)
   {
     GlobalNumbering* n = m->getGlobalNumbering(i);
-    if (isNodal(n) && isPrintable(n,writeFields))
+    if (isNodal(n) && shouldPrint(n,writeFields))
     {
       writePDataArray(file,n,isWritingBinary);
     }
@@ -173,12 +174,12 @@ static void writePPointData(std::ostream& file,
   file << "</PPointData>\n";
 }
 
-static int countIPs(FieldBase* f)
+static int countIPs(FieldBase* f, int cellDim)
 {
   /* assuming a non-mixed mesh here. for the already strained capabilities
      of VTK to accept IP fields, this is the best we can do */
   Mesh* m = f->getMesh();
-  MeshIterator* it = m->begin(m->getDimension());
+  MeshIterator* it = m->begin(cellDim);
   MeshEntity* e = m->iterate(it);
   m->end(it);
   return f->countNodesOn(e);
@@ -195,9 +196,10 @@ static std::string getIPName(FieldBase* f, int point)
 
 static void writeIP_PCellData(std::ostream& file,
     FieldBase* f,
-    bool isWritingBinary = false)
+    bool isWritingBinary,
+    int cellDim)
 {
-  int n = countIPs(f);
+  int n = countIPs(f, cellDim);
   for (int p=0; p < n; ++p)
   {
     std::string s= getIPName(f,p);
@@ -216,31 +218,32 @@ static void writePCellParts(std::ostream& file, bool isWritingBinary = false)
 static void writePCellData(std::ostream& file,
     Mesh* m,
     std::vector<std::string> writeFields,
-    bool isWritingBinary = false)
+    bool isWritingBinary,
+    int cellDim)
 {
   file << "<PCellData>\n";
   for (int i=0; i < m->countFields(); ++i)
   {
     Field* f = m->getField(i);
-    if (isIP(f) && isPrintable(f,writeFields))
+    if (isIP(f, cellDim) && shouldPrint(f,writeFields))
     {
-      writeIP_PCellData(file,f,isWritingBinary);
+      writeIP_PCellData(file, f, isWritingBinary, cellDim);
     }
   }
   for (int i=0; i < m->countNumberings(); ++i)
   {
     Numbering* n = m->getNumbering(i);
-    if (isIP(n) && isPrintable(n,writeFields))
+    if (isIP(n, cellDim) && shouldPrint(n,writeFields))
     {
-      writeIP_PCellData(file,n,isWritingBinary);
+      writeIP_PCellData(file, n, isWritingBinary, cellDim);
     }
   }
   for (int i=0; i < m->countGlobalNumberings(); ++i)
   {
     GlobalNumbering* n = m->getGlobalNumbering(i);
-    if (isIP(n) && isPrintable(n,writeFields))
+    if (isIP(n, cellDim) && shouldPrint(n,writeFields))
     {
-      writeIP_PCellData(file,n,isWritingBinary);
+      writeIP_PCellData(file, n, isWritingBinary, cellDim);
     }
   }
   writePCellParts(file,isWritingBinary);
@@ -285,7 +288,8 @@ static void writePSources(std::ostream& file)
 static void writePvtuFile(const char* prefix,
     Mesh* m,
     std::vector<std::string> writeFields,
-    bool isWritingBinary = false)
+    bool isWritingBinary,
+    int cellDim)
 {
   std::string fileName = stripPath(prefix);
   fileName += ".pvtu";
@@ -298,10 +302,31 @@ static void writePvtuFile(const char* prefix,
   file << "<PUnstructuredGrid GhostLevel=\"0\">\n";
   writePPoints(file,m->getCoordinateField(),isWritingBinary);
   writePPointData(file,m,writeFields,isWritingBinary);
-  writePCellData(file,m,writeFields,isWritingBinary);
+  writePCellData(file, m, writeFields, isWritingBinary, cellDim);
   writePSources(file);
   file << "</PUnstructuredGrid>\n";
   file << "</VTKFile>\n";
+}
+
+static void readPvtuFile(const char* prefix, bool& isWritingBinary)
+{
+  std::string fileName = stripPath(prefix);
+  fileName += ".pvtu";
+  std::stringstream ss;
+  ss << prefix << '/' << fileName;
+  std::string fileNameAndPath = ss.str();
+  std::ifstream file(fileNameAndPath.c_str());
+  assert(file.is_open());
+
+  std::string line;
+  while (std::getline(file, line)) {
+      if (line.find("PDataArray") != std::string::npos) {
+          if (line.find("binary") != std::string::npos)
+              isWritingBinary = true;
+          break;
+      }
+  }
+  file.close();
 }
 
 static void writeDataHeader(std::ostream& file,
@@ -430,7 +455,8 @@ static int countElementNodes(Numbering* n, MeshEntity* e)
 
 static void writeConnectivity(std::ostream& file,
     Numbering* n,
-    bool isWritingBinary = false)
+    bool isWritingBinary,
+    int cellDim)
 {
   file << "<DataArray type=\"Int32\" Name=\"connectivity\"";
   if (isWritingBinary)
@@ -446,7 +472,7 @@ static void writeConnectivity(std::ostream& file,
   MeshEntity* e;
   if (isWritingBinary)
   {
-    MeshIterator* elements = m->begin(m->getDimension());
+    MeshIterator* elements = m->begin(cellDim);
     unsigned int dataLen = 0;
     while ((e = m->iterate(elements)))
     {
@@ -455,7 +481,7 @@ static void writeConnectivity(std::ostream& file,
     m->end(elements);
     unsigned int dataLenBytes = dataLen*sizeof(int);
     int* dataToEncode = new int[dataLen]();
-    elements = m->begin(m->getDimension());
+    elements = m->begin(cellDim);
     unsigned int dataIndex = 0;
     while ((e = m->iterate(elements)))
     {
@@ -474,7 +500,7 @@ static void writeConnectivity(std::ostream& file,
   }
   else
   {
-    MeshIterator* elements = m->begin(m->getDimension());
+    MeshIterator* elements = m->begin(cellDim);
     while ((e = m->iterate(elements)))
     {
       int nen = countElementNodes(n,e);
@@ -493,7 +519,8 @@ static void writeConnectivity(std::ostream& file,
 
 static void writeOffsets(std::ostream& file,
     Numbering* n,
-    bool isWritingBinary = false)
+    bool isWritingBinary,
+    int cellDim)
 {
   file << "<DataArray type=\"Int32\" Name=\"offsets\"";
   if (isWritingBinary)
@@ -509,7 +536,7 @@ static void writeOffsets(std::ostream& file,
   MeshEntity* e;
   if (isWritingBinary)
   {
-    MeshIterator* elements = m->begin(m->getDimension());
+    MeshIterator* elements = m->begin(cellDim);
     unsigned int dataLen = 0;
     while ((e = m->iterate(elements)))
     {
@@ -518,7 +545,7 @@ static void writeOffsets(std::ostream& file,
     m->end(elements);
     unsigned int dataLenBytes = dataLen*sizeof(int);
     int* dataToEncode = new int[dataLen]();
-    elements = m->begin(m->getDimension());
+    elements = m->begin(cellDim);
     unsigned int dataIndex = 0;
     int offset = 0;
     while ((e = m->iterate(elements)))
@@ -533,7 +560,7 @@ static void writeOffsets(std::ostream& file,
   }
   else
   {
-    MeshIterator* elements = m->begin(m->getDimension());
+    MeshIterator* elements = m->begin(cellDim);
     int offset = 0;
     while ((e = m->iterate(elements)))
     {
@@ -547,7 +574,8 @@ static void writeOffsets(std::ostream& file,
 
 static void writeTypes(std::ostream& file,
     Mesh* m,
-    bool isWritingBinary = false)
+    bool isWritingBinary,
+    int cellDim)
 {
   file << "<DataArray type=\"UInt8\" Name=\"types\"";
   if (isWritingBinary)
@@ -577,7 +605,7 @@ static void writeTypes(std::ostream& file,
   if (isWritingBinary)
   {
     unsigned int dataLen = 0;
-    MeshIterator* elements = m->begin(m->getDimension());
+    MeshIterator* elements = m->begin(cellDim);
     while ((e = m->iterate(elements)))
     {
       dataLen++;
@@ -585,7 +613,7 @@ static void writeTypes(std::ostream& file,
     m->end(elements);
     unsigned int dataLenBytes = dataLen*sizeof(uint8_t);
     uint8_t* dataToEncode = new uint8_t[dataLen]();
-    elements = m->begin(m->getDimension());
+    elements = m->begin(cellDim);
     unsigned int dataIndex = 0;
     while ((e = m->iterate(elements)))
     {
@@ -598,7 +626,7 @@ static void writeTypes(std::ostream& file,
   }
   else
   {
-    MeshIterator* elements = m->begin(m->getDimension());
+    MeshIterator* elements = m->begin(cellDim);
     while ((e = m->iterate(elements)))
     {
       file << vtkTypes[m->getType(e)][order-1] << '\n';
@@ -610,12 +638,13 @@ static void writeTypes(std::ostream& file,
 
 static void writeCells(std::ostream& file,
     Numbering* n,
-    bool isWritingBinary = false)
+    bool isWritingBinary,
+    int cellDim)
 {
   file << "<Cells>\n";
-  writeConnectivity(file,n,isWritingBinary);
-  writeOffsets(file,n,isWritingBinary);
-  writeTypes(file,n->getMesh(),isWritingBinary);
+  writeConnectivity(file, n, isWritingBinary, cellDim);
+  writeOffsets(file, n, isWritingBinary, cellDim);
+  writeTypes(file, n->getMesh(), isWritingBinary, cellDim);
   file << "</Cells>\n";
 }
 
@@ -629,7 +658,7 @@ static void writePointData(std::ostream& file,
   for (int i=0; i < m->countFields(); ++i)
   {
     Field* f = m->getField(i);
-    if (isNodal(f) && isPrintable(f,writeFields))
+    if (isNodal(f) && shouldPrint(f,writeFields))
     {
       writeNodalField<double>(file,f,nodes,isWritingBinary);
     }
@@ -637,7 +666,7 @@ static void writePointData(std::ostream& file,
   for (int i=0; i < m->countNumberings(); ++i)
   {
     Numbering* n = m->getNumbering(i);
-    if (isNodal(n) && isPrintable(n,writeFields))
+    if (isNodal(n) && shouldPrint(n,writeFields))
     {
       writeNodalField<int>(file,n,nodes,isWritingBinary);
     }
@@ -645,7 +674,7 @@ static void writePointData(std::ostream& file,
   for (int i=0; i < m->countGlobalNumberings(); ++i)
   {
     GlobalNumbering* n = m->getGlobalNumbering(i);
-    if (isNodal(n) && isPrintable(n,writeFields))
+    if (isNodal(n) && shouldPrint(n,writeFields))
     {
       writeNodalField<long>(file,n,nodes,isWritingBinary);
     }
@@ -664,6 +693,7 @@ class WriteIPField : public FieldOp
     MeshEntity* entity;
     std::ostream* fp;
     bool isWritingBinary;
+    int cellDim;
 
     T* dataToEncode;
     int dataIndex;
@@ -713,7 +743,7 @@ class WriteIPField : public FieldOp
       {
         //calculate size of array
         Mesh* m = f->getMesh();
-        int arraySize = m->count(m->getDimension())*components;
+        int arraySize = m->count(cellDim)*components;
 
         dataToEncode = new T[arraySize](); //allocate space for array
         apply(f); //populate array
@@ -734,12 +764,14 @@ class WriteIPField : public FieldOp
     }
     void run(std::ostream& file,
       FieldBase* f,
-      bool isWritingBinaryArg = false)
+      bool isWritingBinaryArg,
+      int cellDimArg)
     {
       isWritingBinary = isWritingBinaryArg;
+      cellDim = cellDimArg;
       fp = &file;
       dataIndex = 0;
-      int n = countIPs(f);
+      int n = countIPs(f, cellDim);
       for (point=0; point < n; ++point)
       {
         runOnce(f);
@@ -749,10 +781,11 @@ class WriteIPField : public FieldOp
 
 static void writeCellParts(std::ostream& file,
     Mesh* m,
-    bool isWritingBinary = false)
+    bool isWritingBinary,
+    int cellDim)
 {
   writeDataHeader(file, "apf_part", apf::Mesh::INT, 1, isWritingBinary);
-  size_t n = m->count(m->getDimension());
+  size_t n = m->count(cellDim);
   int id = m->getId();
   if (isWritingBinary)
   {
@@ -780,37 +813,38 @@ static void writeCellParts(std::ostream& file,
 static void writeCellData(std::ostream& file,
     Mesh* m,
     std::vector<std::string> writeFields,
-    bool isWritingBinary = false)
+    bool isWritingBinary,
+    int cellDim)
 {
   file << "<CellData>\n";
   WriteIPField<double> wd;
   for (int i=0; i < m->countFields(); ++i)
   {
     Field* f = m->getField(i);
-    if (isIP(f) && isPrintable(f,writeFields))
+    if (isIP(f, cellDim) && shouldPrint(f,writeFields))
     {
-      wd.run(file,f,isWritingBinary);
+      wd.run(file, f, isWritingBinary, cellDim);
     }
   }
   WriteIPField<int> wi;
   for (int i=0; i < m->countNumberings(); ++i)
   {
     Numbering* n = m->getNumbering(i);
-    if (isIP(n) && isPrintable(n,writeFields))
+    if (isIP(n, cellDim) && shouldPrint(n,writeFields))
     {
-      wi.run(file,n,isWritingBinary);
+      wi.run(file, n, isWritingBinary, cellDim);
     }
   }
   WriteIPField<long> wl;
   for (int i=0; i < m->countGlobalNumberings(); ++i)
   {
     GlobalNumbering* n = m->getGlobalNumbering(i);
-    if (isIP(n) && isPrintable(n,writeFields))
+    if (isIP(n, cellDim) && shouldPrint(n,writeFields))
     {
-      wl.run(file,n,isWritingBinary);
+      wl.run(file, n, isWritingBinary, cellDim);
     }
   }
-  writeCellParts(file, m, isWritingBinary);
+  writeCellParts(file, m, isWritingBinary, cellDim);
   file << "</CellData>\n";
 }
 
@@ -837,7 +871,8 @@ static std::string getFileNameAndPathVtu(const char* prefix,
 static void writeVtuFile(const char* prefix,
     Numbering* n,
     std::vector<std::string> writeFields,
-    bool isWritingBinary = false)
+    bool isWritingBinary,
+    int cellDim)
 {
   double t0 = PCU_Time();
   std::string fileName = getPieceFileName(PCU_Comm_Self());
@@ -872,12 +907,12 @@ static void writeVtuFile(const char* prefix,
   buf<< ">\n";
   buf << "<UnstructuredGrid>\n";
   buf << "<Piece NumberOfPoints=\"" << nodes.getSize();
-  buf << "\" NumberOfCells=\"" << m->count(m->getDimension());
+  buf << "\" NumberOfCells=\"" << m->count(cellDim);
   buf << "\">\n";
   writePoints(buf,m,nodes,isWritingBinary);
-  writeCells(buf,n,isWritingBinary);
+  writeCells(buf, n, isWritingBinary, cellDim);
   writePointData(buf,m,nodes,writeFields,isWritingBinary);
-  writeCellData(buf,m,writeFields,isWritingBinary);
+  writeCellData(buf, m, writeFields, isWritingBinary, cellDim);
   buf << "</Piece>\n";
   buf << "</UnstructuredGrid>\n";
   buf << "</VTKFile>\n";
@@ -897,6 +932,187 @@ static void writeVtuFile(const char* prefix,
     printf("writeVtuFile buffers to disk: %f seconds\n", t2 - t1);
   }
 }
+
+static void readVtuFile(const char* prefix, Mesh2* m)
+{
+    std::string fileName = getPieceFileName(PCU_Comm_Self());
+    std::string fileNameAndPath = getFileNameAndPathVtu(prefix, fileName, PCU_Comm_Self());
+    std::ifstream file(fileNameAndPath.c_str());
+    assert(file.is_open());
+
+    int nPoints, nCells;
+    bool lendian = false, rbinary = false;
+    int dim = 1;
+    std::string line;
+
+    /// Line with byte order (big endian by default)
+    /// TODO header type (compression)
+    std::getline(file, line);
+    if (line.find("LittleEndian") != std::string::npos)
+        lendian = true;
+    if(line.find("compressor") != std::string::npos){
+        std::cerr << "VTK read does not support compression yet, aborting..." << std::endl;
+        abort();
+    }
+    /// Skip line
+    std::getline(file, line);
+    /// Line with NumberOfPoints and NumberOfCells
+    std::getline(file, line);
+    sscanf(line.c_str(),"<Piece NumberOfPoints=\"%d\" NumberOfCells=\"%d\">", &nPoints, &nCells);
+    /// Skip line
+    std::getline(file, line);
+    /// Line for DataArray with type, name, space dim and format
+    /// TODO type (Float64 by default)
+    std::getline(file, line);
+    if (line.find("binary") != std::string::npos)
+        rbinary = true;
+    if (line.find("NumberOfComponents=\"2\"") != std::string::npos)
+        dim = 2;
+    else if (line.find("NumberOfComponents=\"3\"") != std::string::npos)
+        dim = 3;
+
+    if (dim < 3) {
+        std::cerr << "VTK read supports 3D meshes for now, aborting..." << std::endl;
+        abort();
+    }
+
+    if (!PCU_Comm_Self())
+    {
+        std::cout << "Reading VTK mesh. Format: ";
+        if (rbinary) {
+            std::cout << "binary. Endian: ";
+            if (lendian)
+                std::cout << "little";
+            else
+                std::cout << "big";
+        }
+        else
+            std::cout << "ascii.";
+
+        std::cout << ". Mesh dim: " << dim << ". Number of vertices: " << nPoints;
+        std::cout << ". Number of regions: " << nCells << std::endl;
+    }
+
+    /// Read the vertex coordinates
+    double* coords;
+    int ndoubles = nPoints*3;
+    coords = new double[ndoubles];
+    if (rbinary) {
+        std::getline(file, line);
+//        std::cout << "Original line: " << line << std::endl;
+
+        /// Decoding the line
+        std::string dline = lion::base64Decode(line);
+
+        char* cline = new char[8];
+
+        /// Getting the header with the decoded buffer size
+        for (int i = 0; i < 4; ++i)
+            cline[i] = dline[i];
+        int nbytes = *(int*)(cline);
+//        std::cout << "Number of decoded bytes: " << nbytes << std::endl;
+        assert(nbytes == ndoubles*8);
+
+        /// Shift to the data buffer
+        dline = dline.substr(4);
+        for (int i = 0; i < ndoubles; ++i) {
+            for (int j = 0 ; j < 8; ++j)
+                cline[j] = dline[i*8+j];
+            coords[i] = *(double*)cline;
+        }
+    }
+    else {
+        for (int i = 0; i < nPoints; ++i) {
+            std::getline(file, line);
+            sscanf(line.c_str(), "%lf %lf %lf\n", coords+i*3, coords+i*3+1, coords+i*3+2);
+        }
+    }
+    //////////////// Debug
+//    for (int i = 0; i < nPoints; ++i)
+//        printf("%lf %lf %lf\n", coords[i*3], coords[i*3+1], coords[i*3+2]);
+    //////////////// Debug
+
+    /// Skip 3 lines
+    for(int i = 0; i < 3; ++i)
+        std::getline(file, line);
+    /// TODO difference betwee type Int32 and Int64
+    std::getline(file, line);
+
+    /// Read the connectivity
+    int* conn;
+    int nelem;
+    if (dim == 2)
+        nelem = 3;
+    else
+        nelem = 4;
+    conn = new int[nCells*nelem];
+
+    /// Suppot 3D meshes for the moment
+    if (rbinary) {
+        std::getline(file, line);
+//        std::cout << "Original line: " << line << std::endl;
+
+        /// Decoding the line
+        std::string dline = lion::base64Decode(line);
+
+        char* cline = new char[8];
+
+        /// Getting the header with the decoded buffer size
+        for (int i = 0; i < 4; ++i)
+            cline[i] = dline[i];
+        int nbytes = *(int*)(cline);
+//        std::cout << "Number of decoded bytes: " << nbytes << std::endl;
+        assert(nbytes == nCells*nelem*4);
+
+        /// Shift to the data buffer
+        dline = dline.substr(4);
+        for (int i = 0; i < nCells*nelem; ++i) {
+            for (int j = 0 ; j < 4; ++j)
+                cline[j] = dline[i*4+j];
+            conn[i] = *(int*)cline;
+        }
+    }
+    else {
+        for (int i = 0; i < nCells; ++i) {
+            std::getline(file, line);
+            sscanf(line.c_str(), "%d %d %d %d\n", conn+i*nelem, conn+i*nelem+1, conn+i*nelem+2, conn+i*nelem+3);
+        }
+    }
+    //////////////// Debug
+//    printf("Number of cells %d\n", nCells);
+//    for (int i = 0; i < nCells; ++i)
+//        printf("%d %d %d %d\n", conn[i*nelem], conn[i*nelem+1], conn[i*nelem+2], conn[i*nelem+3]);
+    //////////////// Debug
+
+    /// TODO read fields
+    file.close();
+/*
+    int nconn = nCells*nelem;
+    printf("%d: number of connections: %d\n", PCU_Comm_Self(), nconn);
+    int psize;
+    PCU_Comm_Size(&psize);
+    for (int pid = 0; pid < psize; ++pid) {
+        if (PCU_Comm_Self() != pid)
+            continue;
+        printf("%d\n", PCU_Comm_Self());
+        for (int i = 0; i < nconn; ++i)
+            printf("%d ", conn[i]);
+        printf("\n\n");
+        PCU_Barrier();
+    }
+*/
+
+    /// Constructing the mesh
+    GlobalToVert outMap;
+    construct(m, conn, nCells, Mesh::TET, outMap);
+    delete [] conn;
+    alignMdsRemotes(m);
+    deriveMdsModel(m);
+    setCoords(m, coords, nPoints, outMap);
+    delete [] coords;
+    outMap.clear();
+}
+
 
 static void safe_mkdir(const char* path)
 {
@@ -931,19 +1147,21 @@ static void makeVtuSubdirectories(const char* prefix, int numParts)
 void writeVtkFilesRunner(const char* prefix,
     Mesh* m,
     std::vector<std::string> writeFields,
-    bool isWritingBinary)
+    bool isWritingBinary,
+    int cellDim)
 {
+  if (cellDim == -1) cellDim = m->getDimension();
   double t0 = PCU_Time();
   if (!PCU_Comm_Self())
   {
     safe_mkdir(prefix);
     makeVtuSubdirectories(prefix, PCU_Comm_Peers());
-    writePvtuFile(prefix,m,writeFields,isWritingBinary);
+    writePvtuFile(prefix, m, writeFields, isWritingBinary, cellDim);
   }
   PCU_Barrier();
   Numbering* n = numberOverlapNodes(m,"apf_vtk_number");
   m->removeNumbering(n);
-  writeVtuFile(prefix,n,writeFields,isWritingBinary);
+  writeVtuFile(prefix, n, writeFields, isWritingBinary, cellDim);
   double t1 = PCU_Time();
   if (!PCU_Comm_Self())
   {
@@ -958,17 +1176,20 @@ std::vector<std::string> populateWriteFields(Mesh* m)
   for (int i=0; i < m->countFields(); ++i)
   {
     Field* f = m->getField(i);
-    writeFields.push_back(f->getName());
+    if (isPrintable(f))
+      writeFields.push_back(f->getName());
   }
   for (int i=0; i < m->countNumberings(); ++i)
   {
     Numbering* n = m->getNumbering(i);
-    writeFields.push_back(n->getName());
+    if (isPrintable(n))
+      writeFields.push_back(n->getName());
   }
   for (int i=0; i < m->countGlobalNumberings(); ++i)
   {
     GlobalNumbering* n = m->getGlobalNumbering(i);
-    writeFields.push_back(n->getName());
+    if (isPrintable(n))
+      writeFields.push_back(n->getName());
   }
   return writeFields;
 }
@@ -983,22 +1204,41 @@ void writeOneVtkFile(const char* prefix, Mesh* m)
   Numbering* n = numberOverlapNodes(m,"apf_vtk_number");
   m->removeNumbering(n);
   std::vector<std::string> writeFields = populateWriteFields(m);
-  writeVtuFile(prefix,n,writeFields);
+  writeVtuFile(prefix, n, writeFields, false, m->getDimension());
   delete n;
 }
 
 void writeVtkFiles(
     const char* prefix,
     Mesh* m,
-    std::vector<std::string> writeFields)
+    std::vector<std::string> writeFields,
+    int cellDim)
 {
-  writeVtkFilesRunner(prefix,m,writeFields,true);
+  writeVtkFilesRunner(prefix, m, writeFields, false, cellDim);
 }
 
-void writeVtkFiles(const char* prefix, Mesh* m)
+void writeVtkFiles(const char* prefix, Mesh* m, int cellDim)
 {
   std::vector<std::string> writeFields = populateWriteFields(m);
-  writeVtkFilesRunner(prefix,m,writeFields,true);
+  writeVtkFiles(prefix, m, writeFields, cellDim);
+}
+
+void readVtkFiles(const char* prefix, Mesh2* m)
+{
+    bool isWritingBinary = false;
+    double t0 = PCU_Time();
+    if (!PCU_Comm_Self())
+    {
+      readPvtuFile(prefix, isWritingBinary);
+    }
+    PCU_Barrier();
+
+    readVtuFile(prefix, m);
+    double t1 = PCU_Time();
+    if (!PCU_Comm_Self())
+    {
+      printf("vtk files %s read in %f seconds\n", prefix, t1 - t0);
+    }
 }
 
 void writeASCIIVtkFiles(
@@ -1006,17 +1246,13 @@ void writeASCIIVtkFiles(
     Mesh* m,
     std::vector<std::string> writeFields)
 {
-  //*** this function writes vtk files with ASCII encoding ***
-  //*** not recommended, use writeVtkFiles instead ***
-  writeVtkFilesRunner(prefix,m,writeFields,false);
+  writeVtkFilesRunner(prefix, m, writeFields, false, -1);
 }
 
 void writeASCIIVtkFiles(const char* prefix, Mesh* m)
 {
-  //*** this function writes vtk files with ASCII encoding ***
-  //*** not recommended, use writeVtkFiles instead ***
   std::vector<std::string> writeFields = populateWriteFields(m);
-  writeVtkFilesRunner(prefix,m,writeFields,false);
+  writeASCIIVtkFiles(prefix, m, writeFields);
 }
 
 }

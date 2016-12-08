@@ -124,36 +124,6 @@ void pumi_ment_get2ndAdj (pMeshEnt e, int bridge_dim, int target_dim, std::vecto
   apf::getBridgeAdjacent(pumi::instance()->mesh, e, bridge_dim, target_dim, adjacent);
   for (size_t i=0; i<adjacent.getSize(); ++i)
     vecAdjEnt.push_back(adjacent[i]);
-
-  /* org algorithm copied from FMDB
-  if (bridge_dim==target_dim) 
-    return;  // error
-
-  // get adjacent entities of bridge type
-  std::vector<pMeshEnt> brgAdjEnt;
-  
-  //PUMI_MeshEnt_GetAdj(meshEnt, bridge_dim, 1, brgAdjEnt);
-  pumi_ment_getadj (e, bridge_dim, brgAdjEnt);
-//  if (!pumi_rank()) std::cout<<"("<<pumi_rank()<<") "<<__func__<<": ghost's bridge_dim size="<<brgAdjEnt.size()<<"\n";
-  // for brg adj entity, get tgt adj entities
-  std::vector<pMeshEnt> tempAdjEnt;
-  std::set<pMeshEnt> uniqAdjEnt;
-  for (std::vector<pMeshEnt>::iterator iter=brgAdjEnt.begin(); iter!=brgAdjEnt.end(); ++iter)
-  {
-    tempAdjEnt.clear();
-//    if (!pumi_rank()) std::cout<<"("<<pumi_rank()<<") "<<__func__<<": bridge_ent"<<pumi_ment_getglobalid(*iter)<<"\n";
-    pumi_ment_getadj(*iter, target_dim, tempAdjEnt);
-    //if (!pumi_rank()) std::cout<<"("<<pumi_rank()<<") "<<__func__<<": bridge_ent"<<pumi_ment_getglobalid(*iter)<<" pumi_ment_getadj("<<target_dim<<").size()="<<tempAdjEnt.size()<<"\n";
-    uniqAdjEnt.insert(tempAdjEnt.begin(), tempAdjEnt.end());
-  }
-  
-  // remove original entity from vecAdjEnt;
-  if (getDimension(pumi::instance()->mesh, e)==target_dim) 
-    uniqAdjEnt.erase(e);
-
-  std::copy(uniqAdjEnt.begin(), uniqAdjEnt.end(), std::back_inserter(vecAdjEnt));
-  return;
-*/
 }
 
 int pumi_ment_getLocalID(pMeshEnt e)
@@ -163,7 +133,8 @@ int pumi_ment_getLocalID(pMeshEnt e)
 
 pGeomEnt pumi_ment_getGeomClas(pMeshEnt e)
 {
-  return (pGeomEnt)(pumi::instance()->mesh->toModel(e));
+  gmi_ent* clas=(gmi_ent*)pumi::instance()->mesh->toModel(e);
+  return pumi::instance()->model->getGeomEnt(clas);
 }
 
 // owner part information
@@ -190,6 +161,16 @@ bool pumi_ment_isOwned(pMeshEnt e)
     return true;
   else
     return false;
+}
+
+bool pumi_ment_isOn(pMeshEnt e, int partID)
+{
+  if (partID==pumi_rank()) return true;
+  apf::Copies remotes;
+  pumi::instance()->mesh->getRemotes(e,remotes);
+  APF_ITERATE(Copies,remotes,rit)
+    if (rit->first==partID) return true;
+  return false;
 }
 
 // remote copy information
@@ -249,7 +230,7 @@ void pumi_ment_setPtnTopology (pMeshEnt)
 int pumi_ment_getGlobalID(pMeshEnt e)
 {
   pMeshTag tag = pumi::instance()->mesh->findTag("global_id");
-  assert(tag);
+  if (!tag) return -1;
   int global_id;
   pumi::instance()->mesh->getIntTag(e, tag, &global_id);
   return global_id;

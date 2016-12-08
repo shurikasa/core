@@ -22,10 +22,27 @@ int main(int argc, char** argv)
 
   apf::Mesh2* m = apf::loadMdsMesh(argv[1],argv[2]);
   int dim = m->getDimension();
+
+  int nconn = m->count(dim) * 4;
+
   extractCoords(m, coords, nverts);
   destruct(m, conn, nelem, etype);
   m->destroyNative();
   apf::destroyMesh(m);
+
+  printf("%d: number of connections: %d\n", PCU_Comm_Self(), nconn);
+  int psize;
+  PCU_Comm_Size(&psize);
+  for (int pid = 0; pid < psize; ++pid) {
+      if (PCU_Comm_Self() != pid)
+          continue;
+      printf("%d\n", PCU_Comm_Self());
+      for (int i = 0; i < nconn; ++i)
+          printf("%d ", conn[i]);
+      printf("\n\n");
+      PCU_Barrier();
+  }
+
 
   gmi_model* model = gmi_load(".null");
   m = apf::makeEmptyMdsMesh(model, dim, false);
