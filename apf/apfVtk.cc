@@ -999,7 +999,6 @@ static void readVtuFile(const char* prefix, Mesh2* m)
     coords = new double[ndoubles];
     if (rbinary) {
         std::getline(file, line);
-//        std::cout << "Original line: " << line << std::endl;
 
         /// Decoding the line
         std::string dline = lion::base64Decode(line);
@@ -1010,7 +1009,6 @@ static void readVtuFile(const char* prefix, Mesh2* m)
         for (int i = 0; i < 4; ++i)
             cline[i] = dline[i];
         int nbytes = *(int*)(cline);
-//        std::cout << "Number of decoded bytes: " << nbytes << std::endl;
         assert(nbytes == ndoubles*8);
 
         /// Shift to the data buffer
@@ -1027,10 +1025,6 @@ static void readVtuFile(const char* prefix, Mesh2* m)
             sscanf(line.c_str(), "%lf %lf %lf\n", coords+i*3, coords+i*3+1, coords+i*3+2);
         }
     }
-    //////////////// Debug
-//    for (int i = 0; i < nPoints; ++i)
-//        printf("%lf %lf %lf\n", coords[i*3], coords[i*3+1], coords[i*3+2]);
-    //////////////// Debug
 
     /// Skip 3 lines
     for(int i = 0; i < 3; ++i)
@@ -1050,7 +1044,6 @@ static void readVtuFile(const char* prefix, Mesh2* m)
     /// Suppot 3D meshes for the moment
     if (rbinary) {
         std::getline(file, line);
-//        std::cout << "Original line: " << line << std::endl;
 
         /// Decoding the line
         std::string dline = lion::base64Decode(line);
@@ -1061,7 +1054,6 @@ static void readVtuFile(const char* prefix, Mesh2* m)
         for (int i = 0; i < 4; ++i)
             cline[i] = dline[i];
         int nbytes = *(int*)(cline);
-//        std::cout << "Number of decoded bytes: " << nbytes << std::endl;
         assert(nbytes == nCells*nelem*4);
 
         /// Shift to the data buffer
@@ -1078,29 +1070,9 @@ static void readVtuFile(const char* prefix, Mesh2* m)
             sscanf(line.c_str(), "%d %d %d %d\n", conn+i*nelem, conn+i*nelem+1, conn+i*nelem+2, conn+i*nelem+3);
         }
     }
-    //////////////// Debug
-//    printf("Number of cells %d\n", nCells);
-//    for (int i = 0; i < nCells; ++i)
-//        printf("%d %d %d %d\n", conn[i*nelem], conn[i*nelem+1], conn[i*nelem+2], conn[i*nelem+3]);
-    //////////////// Debug
 
     /// TODO read fields
     file.close();
-/*
-    int nconn = nCells*nelem;
-    printf("%d: number of connections: %d\n", PCU_Comm_Self(), nconn);
-    int psize;
-    PCU_Comm_Size(&psize);
-    for (int pid = 0; pid < psize; ++pid) {
-        if (PCU_Comm_Self() != pid)
-            continue;
-        printf("%d\n", PCU_Comm_Self());
-        for (int i = 0; i < nconn; ++i)
-            printf("%d ", conn[i]);
-        printf("\n\n");
-        PCU_Barrier();
-    }
-*/
 
     /// Constructing the mesh
     GlobalToVert outMap;
