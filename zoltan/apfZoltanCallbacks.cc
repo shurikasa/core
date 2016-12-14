@@ -15,6 +15,8 @@
 #include <cstdlib>
 #include <iostream>
 
+#define IDXTYPEWIDTH 32
+
 namespace apf {
 
 static int setZoltanLbMethod(struct Zoltan_Struct* ztn, ZoltanMesh* zb)
