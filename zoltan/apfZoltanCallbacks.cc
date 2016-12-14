@@ -10,7 +10,7 @@
 #include "apfZoltan.h"
 #include "apfShape.h"
 #include <PCU.h>
-#include <metis.h>
+#include <metis/metis.h>
 #include <cassert>
 #include <cstdlib>
 #include <iostream>
