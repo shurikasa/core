@@ -16,16 +16,17 @@ int main(int argc, char** argv)
 {
     MPI_Init(&argc,&argv);
     PCU_Comm_Init();
-    if ( argc != 3 ) {
+    if ( argc != 4 ) {
         if ( !PCU_Comm_Self() )
-            printf("Usage: %s <in .obj> <out .dmg>\n", argv[0]);
+            printf("Usage: %s <in .obj> <out .dmg> <out .geo>\n", argv[0]);
         MPI_Finalize();
         exit(EXIT_FAILURE);
     }
 
     /// Declaring files for read and write
     std::ifstream ifile(argv[1]);
-    std::ofstream ofile(argv[2]);
+    std::ofstream odfile(argv[2]);
+    std::ofstream ogfile(argv[3]);
 
     std::vector< std::vector<double> > verts;
     std::map< std::vector<long>, long > edges;
@@ -103,20 +104,27 @@ std::cout << "number of faces: " << faces.size() << std::endl;
     }
 
     /// Writing dmg file
-    ofile << "1 " << faces.size() << " " << edges.size() << " " << verts.size() << "\n0 0 0\n0 0 0\n";
+    odfile << "1 " << faces.size() << " " << edges.size() << " " << verts.size() << "\n0 0 0\n0 0 0\n";
     tag_counter = 0;
     /// Writing vertices
-    for (size_t i = 0; i < verts.size(); ++i, ++tag_counter)
-        ofile << tag_counter << " " << verts[i][0] << " " << verts[i][1] << " " << verts[i][2] << "\n";
+    for (size_t i = 0; i < verts.size(); ++i, ++tag_counter) {
+        odfile << tag_counter << " " << verts[i][0] << " " << verts[i][1] << " " << verts[i][2] << "\n";
+        ogfile << "Point(" << tag_counter << ") = {" << verts[i][0] << "," << verts[i][1] << "," << verts[i][2] << "};\n";
+        ogfile << "Physical Point(" << tag_counter << ") = {" << tag_counter << "};\n";
+    }
 
     /// Writing edges
-    for (std::map< std::vector<long>, long >::iterator mapit = edges.begin(); mapit != edges.end(); ++mapit, ++tag_counter)
-        ofile << mapit->second << " " << mapit->first[0] << " " << mapit->first[1] << "\n";
+    for (std::map< std::vector<long>, long >::iterator mapit = edges.begin(); mapit != edges.end(); ++mapit, ++tag_counter) {
+        odfile << mapit->second << " " << mapit->first[0] << " " << mapit->first[1] << "\n";
+        ogfile << "Line(" << mapit->second << ") = {" << mapit->first[0] << "," << mapit->first[1] << "};\n";
+        ogfile << "Physical Line(" << mapit->second << ") = {" << mapit->second << "};\n";
+    }
 
     /// Writing faces
     size_t face_tag_counter = tag_counter;
     for (size_t i = 0; i < faces.size(); ++i, ++tag_counter) {
-        ofile << tag_counter << " 1\n 3\n";
+        odfile << tag_counter << " 1\n 3\n";
+        ogfile << "Line Loop(" << tag_counter << ") = {";
         for (size_t j = 0; j < 3; ++j) {
             std::vector<long> ind(2);
             int dir;
@@ -130,16 +138,32 @@ std::cout << "number of faces: " << faces.size() << std::endl;
                 ind[1] = faces[i][(j+1)%3];
                 dir = 1;
             }
-            ofile << "  " << edges[ind]  << " " << dir << "\n";
+            odfile << "  " << edges[ind]  << " " << dir << "\n";
+            if (dir)
+                ogfile << edges[ind];
+            else
+                ogfile << -edges[ind];
+            if (j < 2)
+                ogfile << ",";
         }
+        ogfile << "};\nRuled Surface(" << tag_counter << ") = {" << tag_counter << "};\n";
+        ogfile << "Physical Surface(" << tag_counter << ") = {" << tag_counter << "};\n";
     }
 
     /// Write the volume tag and all face tags comprising it
-    ofile << tag_counter << " 1\n " << faces.size() << "\n";
-    for (size_t i = 0; i < faces.size(); ++i, ++face_tag_counter)
-        ofile << "  " << face_tag_counter << " 1\n";
+    odfile << tag_counter << " 1\n " << faces.size() << "\n";
+    ogfile << "Surface Loop(" << tag_counter << ") = {";
+    for (size_t i = 0; i < faces.size(); ++i, ++face_tag_counter) {
+        odfile << "  " << face_tag_counter << " 1\n";
+        ogfile << face_tag_counter;
+        if (i < faces.size() - 1)
+            ogfile << ",";
+    }
+    ogfile << "};\nVolume(" << tag_counter << ") = {" << tag_counter << "};\n";
+    ogfile << "Physical Volume(" << tag_counter << ") = {" << tag_counter << "};\n";
 
-    ofile.close();
+    odfile.close();
+    ogfile.close();
 
     PCU_Comm_Free();
     MPI_Finalize();
