@@ -46,7 +46,7 @@ int main(int argc, char** argv)
             std::vector<double> xyz(3);
             sscanf(line.c_str(), "v %lf %lf %lf\n", coords, coords+1, coords+2);
             for (int i = 0; i < 3; ++i)
-                xyz[i] = coords[i];
+                xyz[i] = coords[i] * 1e-6;
             verts.push_back(xyz);
         }
         else

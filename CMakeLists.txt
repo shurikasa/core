@@ -124,3 +124,9 @@ if(BUILD_EXES)
 endif()
 
 bob_end_package()
+
+#string(REPLACE "-Werror" "" SCOREC_C_FLAGS "${SCOREC_C_FLAGS}")
+#string(REPLACE "-Werror" "" SCOREC_CXX_FLAGS "${SCOREC_CXX_FLAGS}")
+#string(REPLACE "-Werror" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+#string(REPLACE "-Werror" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+
