@@ -2,6 +2,7 @@
 #include <fstream>
 #include <cstdlib>
 #include <map>
+#include <set>
 #include <vector>
 
 #include <apf.h>
@@ -41,17 +42,18 @@ void CreateDmgFromGmsh(const char* filename)
 std::cout << "Number of geom entities: " << nents[0] << ", " << nents[1] << ", " << nents[2] << ", " << nents[3] << std::endl;
 
     /// Get vertices, geometrical and mesh correspondance
-    long gvert, mvert, physical, phtag;
-    std::map<long, long> mapverts;
+    long gvtag, nphys, phtag;
+    std::set<long> setverts;
     for (long i = 0; i < nents[0]; ++i)
     {
-        mshfile >> gvert;
-        mshfile >> physical;
-        mshfile >> mvert;
+        mshfile >> gvtag;
+        mshfile >> nphys;
 
-        if (!physical)
+        if (!nphys)
             continue;
-        mapverts[gvert] = mvert;
+
+        mshfile >> phtag;
+        setverts.insert(gvtag);
     }
 
     /// Get edges
@@ -64,10 +66,10 @@ std::cout << "Number of geom entities: " << nents[0] << ", " << nents[1] << ", "
         mshfile >> nverts;
         for (int j = 0; j < 2; ++j)
             mshfile >> verts[j];
-        mshfile >> physical;
+        mshfile >> nphys;
         mshfile >> phtag;
         
-        if (!physical)
+        if (!nphys)
             continue;
         mapedges[gedge] = verts;
     }
@@ -82,10 +84,10 @@ std::cout << "Number of geom entities: " << nents[0] << ", " << nents[1] << ", "
         std::vector<long> edges(nedges);
         for (int j = 0; j < nedges; ++j)
             mshfile >> edges[j];
-        mshfile >> physical;
+        mshfile >> nphys;
         mshfile >> phtag;
 
-        if (!physical)
+        if (!nphys)
             continue;
         mapfaces[gface] = edges;
     }
@@ -100,37 +102,71 @@ std::cout << "Number of geom entities: " << nents[0] << ", " << nents[1] << ", "
         std::vector<long> faces(nfaces);
         for (int j = 0; j < nfaces; ++j)
             mshfile >> faces[j];
-        mshfile >> physical;
-        mshfile >> phtag;
+        mshfile >> nphys;
 
-        if (!physical)
+        if (!nphys)
             continue;
+
+        mshfile >> phtag;
         mapregions[gregion] = faces;
     }
 
     /// Reading and writing vertices
     while (std::getline(mshfile, line)) {
+        if (line.compare("$Elements") == 0)
+        {
+            std::getline(mshfile, line);
+            break;
+        }
+    }
+
+
+    /// Associate geometrical vertices with mesh ones
+    long nprocessed = 0;
+    long mptag, mvtype, nattr, mvtag;
+    std::map<long, long> mapverts;
+    std::set<long>::iterator svit;
+    while(nprocessed < (long)setverts.size())
+    {
+        mshfile >> mptag;
+        mshfile >> mvtype;
+        mshfile >> nattr;
+        mshfile >> phtag;
+        mshfile >> gvtag;
+        mshfile >> mvtag;
+
+        if (setverts.count(gvtag))
+        {
+            mapverts[mvtag] = gvtag;
+            nprocessed++;
+        }
+    }
+
+
+    mshfile.close();
+    mshfile.open(filename, std::fstream::in);
+
+    while (std::getline(mshfile, line)) {
         if (line.compare("$Nodes") == 0)
             break;
-    }    
+    }
 
     /// Number of mesh vertices
-    long nmverts;
-    mshfile >> nmverts;
+    long nmvtags;
+    mshfile >> nmvtags;
 
-    long nprocessed = 0;
+    nprocessed = 0;
     double coords[3];
     std::map<long, long>::iterator mvit;
-    for (long i = 0; i < nmverts; ++i)
+    for (long i = 0; i < nmvtags; ++i)
     {
-        mshfile >> mvert;
---mvert;
+        mshfile >> mvtag;
         for (int j = 0; j < 3; ++j)
             mshfile >> coords[j];
-        mvit = mapverts.find(mvert);
+        mvit = mapverts.find(mvtag);
         if (mvit != mapverts.end())
         {
-            mdlfile << mvit->first << " " << coords[0] << " " << coords[1] << " " << coords[2] << "\n";
+            mdlfile << mvit->second << " " << coords[0] << " " << coords[1] << " " << coords[2] << "\n";
             ++nprocessed;
             if (nprocessed == nents[0])
                 break;
@@ -194,6 +230,8 @@ int main(int argc, char** argv)
 
     /// Create the model from the topological information in the mesh
     CreateDmgFromGmsh(argv[1]);
+
+    std::cout << "Created .dmg geometry, converting the mesh" << std::endl;
 
     /// Setting up empty models and meshes
     gmi_register_null();
