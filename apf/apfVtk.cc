@@ -17,6 +17,7 @@
 #include "../mds/apfMDS.h"
 #include <sstream>
 #include <fstream>
+#include <iostream>
 #include <cassert>
 #include <cstdlib>
 #include <stdint.h>
