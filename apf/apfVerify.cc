@@ -9,6 +9,8 @@
 
 namespace apf {
 
+static bool evalid = 1;
+
 static void intersect(
     std::set<int>& a,
     std::set<int> const& b)
@@ -161,7 +163,7 @@ static void verifyUp(Mesh* m, UpwardCounts& guc,
         ss << "at least " << expected << '\n';
     }
 
-    printf("The problematic model edge number is %d\n",m->getModelTag(m->toModel(e)));
+    printf("The problematic model entity tag is %d, model dimention is %d, entity dimention is %d\n", m->getModelTag(m->toModel(e)), m->getModelType(m->toModel(e)), entityDimension);
     apf::Downward de;
     int nde = m->getDownward(e, 0, de);
     printf("Vertices are:\n");
@@ -174,7 +176,8 @@ static void verifyUp(Mesh* m, UpwardCounts& guc,
         }
         printf("\n\n");
     }
-
+    evalid = 0;
+        
     std::string s = ss.str(); 
     if (!adjacentToUpwardGhost && abort_on_error)
       fail(s.c_str()); 
@@ -795,6 +798,12 @@ void verify(Mesh* m, bool abort_on_error)
   double t1 = PCU_Time();
   if (!PCU_Comm_Self())
     printf("mesh verified in %f seconds\n", t1 - t0);
+
+  if (!evalid){
+      if (!PCU_Comm_Self())
+          printf("The mesh is invalid, aborting...i\n");
+      abort();
+  }
 }
 
 }
